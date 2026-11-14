@@ -1,0 +1,53 @@
+{
+  "name": "@civ-clone/civ2-diplomacy",
+  "version": "0.1.0",
+  "main": "index.js",
+  "description": "Civilization II's diplomacy on base-diplomacy: contact, meetings, peace and war, with no Senate.",
+  "repository": "git@github.com:civ-clone/civ2-diplomacy.git",
+  "keywords": [
+    "typescript",
+    "civilization"
+  ],
+  "author": "dom111 <dom111@users.noreply.github.com>",
+  "license": "MIT",
+  "scripts": {
+    "build": "npm run ts:compile && npm run prettier:format",
+    "prettier:check": "prettier --config .prettierrc --check '**/*.ts'",
+    "prettier:format": "prettier --config .prettierrc '**/*.ts' --write",
+    "test": "ts-mocha ./tests/*.test.ts",
+    "ts:compile": "tsc --build tsconfig.json"
+  },
+  "devDependencies": {
+    "@civ-clone/base-government-republic": "^0.1.0",
+    "@civ-clone/core-ai-client": "^0.1.3",
+    "@types/chai": "^4.0.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^16.0.0",
+    "chai": "^4.0.0",
+    "mocha": "^10.0.0",
+    "prettier": "^2.8.8",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^4.0.0"
+  },
+  "dependencies": {
+    "@civ-clone/base-diplomacy": "^0.1.2",
+    "@civ-clone/base-diplomacy-declaration-peace": "^0.1.0",
+    "@civ-clone/base-diplomacy-declaration-war": "^0.1.0",
+    "@civ-clone/base-diplomacy-interaction-contact": "^0.1.0",
+    "@civ-clone/base-leader-trait-aggression": "^0.1.1",
+    "@civ-clone/base-unit-trait-detonates": "^0.1.0",
+    "@civ-clone/civ2-difficulty": "github:civ-clone/civ2-difficulty",
+    "@civ-clone/core-civilization": "^0.1.8",
+    "@civ-clone/core-difficulty": "^0.1.0",
+    "@civ-clone/core-diplomacy": "^0.1.8",
+    "@civ-clone/core-game": "^0.1.17",
+    "@civ-clone/core-player": "^0.1.10",
+    "@civ-clone/core-rule": "^0.1.9",
+    "@civ-clone/core-unit": "^0.1.31"
+  },
+  "civ-clone": {
+    "conflicts": [
+      "@civ-clone/civ1-diplomacy"
+    ]
+  }
+}
