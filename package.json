@@ -30,7 +30,7 @@
     "typescript": "^4.0.0"
   },
   "dependencies": {
-    "@civ-clone/base-diplomacy": "github:civ-clone/base-diplomacy#feat/rule-assemblers",
+    "@civ-clone/base-diplomacy": "^0.1.2",
     "@civ-clone/base-diplomacy-declaration-peace": "^0.1.0",
     "@civ-clone/base-diplomacy-declaration-war": "^0.1.0",
     "@civ-clone/base-diplomacy-interaction-contact": "^0.1.0",
