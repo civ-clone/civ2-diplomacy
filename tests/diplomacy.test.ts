@@ -1,50 +1,50 @@
-import { Game } from '@civ-clone/core-game';
+import {
+  ATTITUDE_DRIFT_RULE,
+  BORDER_INTRUDERS_RULE,
+  SENATE_RULE,
+  TREATY_BREAKING_RULE,
+} from '../RuleIds';
 import { dependenciesOf, getRules } from '../registerRules';
 import Aggressive from '@civ-clone/base-leader-trait-aggression/Aggression/Aggressive';
 import Friendly from '@civ-clone/base-leader-trait-aggression/Aggression/Friendly';
+import { Game } from '@civ-clone/core-game';
 import Leader from '@civ-clone/core-civilization/Leader';
+import { PERSON_STEPS } from '../lib/rules/talks';
 import Player from '@civ-clone/core-player/Player';
-import Republic from '@civ-clone/base-government-republic/Republic';
+import Step from '@civ-clone/core-diplomacy/Rules/Negotiation/Step';
 import { expect } from 'chai';
-import { meetingRules } from '../lib/meeting';
 import readers from '../lib/readers';
 
-// Rules that carry an id carry civ2-diplomacy's; the meeting's steps and contact carry none, as civ1-diplomacy's.
+// Rules that carry an id carry civ2-diplomacy's; the meeting's steps and contact carry none.
 describe('civ2-diplomacy', (): void => {
-  it("builds base-diplomacy's rules with its own prefix, and no thefts rule", (): void => {
+  it('builds its rules with its own prefix, and none of Civ1 meeting rows', (): void => {
     const game = new Game(),
       rules = getRules(dependenciesOf(game), game),
       ids = rules.map((rule) => rule.id());
 
-    expect(rules.length).equal(1 + 2 + 17 + 3 + 1 + 6 + 1 + 1);
     ids
       .filter((id) => id !== null)
       .forEach((id) => expect(id!.startsWith(`civ2-diplomacy:`), id!).true);
-    expect(ids.filter((id) => id === null)).length(17 + 1);
-    expect(ids).include(`civ2-diplomacy:proposal/resolved/peace`);
-    expect(ids).include(
-      `civ2-diplomacy:player/may-negotiate/not-the-barbarians`
+    // One step for the computer player and one for each of the person's choices; contact when units meet.
+    expect(rules.filter((rule) => rule instanceof Step).length).equal(
+      1 + PERSON_STEPS
     );
-    expect(ids.some((id) => id !== null && id.includes('captured'))).false;
-  });
-
-  it('has no Senate: a Republic answers to none, and a meeting changes no government', (): void => {
-    const game = new Game(),
-      player = new Player(game.rules),
-      dependencies = {
-        ...dependenciesOf(game),
-        playerGovernmentRegistry: {
-          getByPlayer: () => ({
-            is: (...governments: unknown[]) => governments.includes(Republic),
-          }),
-        } as any,
-      };
-
-    expect(readers(dependencies).hasSenate(player)).false;
-    expect(meetingRules(dependencies).hasSenate(player)).false;
-    expect(() =>
-      meetingRules(dependencies).changeGovernment(player)
-    ).not.throw();
+    expect(ids).include.members([
+      ATTITUDE_DRIFT_RULE,
+      BORDER_INTRUDERS_RULE,
+      TREATY_BREAKING_RULE,
+      SENATE_RULE,
+      'civ2-diplomacy:proposal/resolved/answer',
+      'civ2-diplomacy:proposal/resolved/agenda',
+      'civ2-diplomacy:declared-war/reputation',
+      'civ2-diplomacy:unit/moved/computers-meet',
+    ]);
+    expect(ids).not.include('civ2-diplomacy:proposal/resolved/cancel-treaty');
+    expect(ids).not.include('civ2-diplomacy:proposal/resolved/tribute');
+    expect(ids).not.include('civ2-diplomacy:player/turn-start/drop-sham-peace');
+    expect(new Set(ids.filter((id) => id !== null)).size).equal(
+      ids.filter((id) => id !== null).length
+    );
   });
 
   it("reads the leader's attack attitude: Aggressive 1, Friendly −1", (): void => {
