@@ -55,6 +55,11 @@ import Never from '@civ-clone/core-diplomacy/Expiries/Never';
 import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
 import alliesJoinWar from '../lib/alliances';
 import { RuleIds } from '../lib/rules/turnStart';
+import Contact from '@civ-clone/base-diplomacy-interaction-contact/Contact';
+import DiplomaticMissions from '@civ-clone/base-unit-trait-diplomatic-missions/DiplomaticMissions';
+import Moved from '@civ-clone/core-unit/Rules/Moved';
+import { COMPUTERS_MET, TURN_BITS } from '../lib/flags';
+import { sendHome, withdrawUnits } from '../lib/effects';
 import {
   lastContact,
   recordContact,
@@ -831,5 +836,122 @@ describe('turn start order', (): void => {
     expect(at(RuleIds.treatyBreaking)).greaterThan(-1);
     expect(at(RuleIds.treatyBreaking)).lessThan(at(RuleIds.borderIntruders));
     expect(at(RuleIds.borderIntruders)).lessThan(at(RuleIds.attitudeDrift));
+  });
+});
+
+describe('units meeting', (): void => {
+  // Units of `owners` on stand-in squares, all next to each other.
+  const squares = (setUp: ReturnType<typeof position>) => {
+    const placed = new Map<unknown, unknown[]>(),
+      square = (water: boolean): any => ({
+        isWater: () => water,
+        getNeighbours: () =>
+          Array.from(placed.keys()).filter((t) => t !== tiles[water ? 1 : 0]),
+      }),
+      tiles = [square(false), square(true)],
+      place = (player: Player, tile: any) => {
+        const unit = {
+          id: () => `${player.id()}-${placed.size}`,
+          player: () => player,
+          tile: () => tile,
+          attack: () => ({ value: () => 1 }),
+          defence: () => ({ value: () => 1 }),
+        };
+
+        placed.set(tile, [...(placed.get(tile) ?? []), unit]);
+
+        return unit;
+      };
+
+    (setUp.dependencies.unitRegistry as any).getByTile = (tile: unknown) =>
+      placed.get(tile) ?? [];
+
+    return { placed, square, place };
+  };
+
+  it('makes contact between computer players only through their meeting on land (`diplo_civs_meet`), and contact with a person every time it is lost', (): void => {
+    const setUp = position([{ human: true }, {}, {}]),
+      [person, one, two] = setUp.players,
+      { square, place } = squares(setUp),
+      land = square(false),
+      landToo = square(false),
+      sea = square(true),
+      moved = (unit: unknown) => setUp.ruleRegistry.process(Moved, unit, null),
+      contact = (a: Player, b: Player) => inContact(setUp.dependencies, a, b);
+
+    // At sea, two computer players don't meet.
+    const ship = place(one, sea);
+
+    place(two, landToo);
+    moved(ship);
+    expect(contact(one, two)).false;
+
+    // On land they do, deciding once a turn, the decision kept as a turn bit.
+    const soldier = place(one, land);
+
+    moved(soldier);
+    expect(contact(one, two)).true;
+    expect(hasFlag(setUp.dependencies, one, two, COMPUTERS_MET)).true;
+    clearBoth(setUp.dependencies, one, two, RECENT_CONTACT);
+    moved(soldier);
+    expect(hasFlag(setUp.dependencies, one, two, RECENT_CONTACT)).false;
+    clearBoth(setUp.dependencies, one, two, TURN_BITS);
+    moved(soldier);
+    expect(hasFlag(setUp.dependencies, one, two, RECENT_CONTACT)).true;
+
+    // A person met is in contact; contact lost is made again.
+    place(person, sea);
+    moved(soldier);
+    expect(contact(one, person)).true;
+    setUp.interactionRegistry
+      .getByPlayers(one, person)
+      .filter((interaction) => interaction instanceof Contact)
+      .forEach((found) => setUp.interactionRegistry.unregister(found));
+    expect(contact(one, person)).false;
+    moved(soldier);
+    expect(contact(one, person)).true;
+  });
+
+  it("withdraws a computer player's units, not its diplomats, from near a person's cities, and counts one home already (`diplo_answer_demand`, `role < 6`, `:1945-1960`)", (): void => {
+    const setUp = position([{ human: true }, {}]),
+      [person, computer] = setUp.players,
+      place = (name: string, diplomat = false) => {
+        let current = name;
+
+        return {
+          player: () => computer,
+          tile: () => ({
+            name: current,
+            isWater: () => false,
+            distanceFrom: (to: any) =>
+              current === to.name ? 0 : to.name === 'border' ? 1 : 5,
+          }),
+          attack: () => ({ value: () => 1 }),
+          defence: () => ({ value: () => 1 }),
+          hasTrait: (Trait: unknown) =>
+            diplomat && Trait === DiplomaticMissions,
+          setTile: (to: any) => (current = to.name),
+          setStatus: () => {},
+          applyVisibility: () => {},
+          where: () => current,
+        };
+      },
+      units = [place('near'), place('near', true)],
+      dependencies = {
+        ...setUp.dependencies,
+        cityRegistry: {
+          getByPlayer: (player: Player) => [
+            { tile: () => ({ name: player === person ? 'border' : 'home' }) },
+          ],
+        },
+        unitRegistry: { getByPlayer: () => units },
+      } as any;
+
+    expect(withdrawUnits(dependencies, computer, person)).equal(1);
+    expect(units.map((unit) => unit.where())).eql(['home', 'near']);
+
+    // `unit_relocate` on a unit in its own city: it stays, and counts.
+    expect(sendHome(dependencies, units[0] as any)).true;
+    expect(units[0].where()).equal('home');
   });
 });

@@ -11,7 +11,6 @@ const detonated_1 = require("@civ-clone/base-diplomacy/lib/rules/detonated");
 const interaction_1 = require("@civ-clone/base-diplomacy/lib/rules/interaction");
 const senate_1 = require("./lib/senate");
 const mayNegotiate_1 = require("@civ-clone/base-diplomacy/lib/rules/mayNegotiate");
-const moved_1 = require("@civ-clone/base-diplomacy/lib/rules/moved");
 const readers_1 = require("./lib/readers");
 const senate_2 = require("./lib/senate");
 const numbers_1 = require("./lib/numbers");
@@ -74,7 +73,6 @@ const getRules = (dependencies, game) => {
         ...(0, talks_1.terminatedRules)(exports.PREFIX, dependencies, meeting),
         ...(0, detonated_1.default)(exports.PREFIX, dependencies),
         ...(0, relations_1.detonatedRules)(exports.PREFIX, dependencies),
-        ...(0, moved_1.default)(dependencies.interactionRegistry, dependencies.unitRegistry),
         ...(0, relations_1.createdRules)(exports.PREFIX, dependencies, random),
         ...(0, relations_1.declaredWarRules)(exports.PREFIX, dependencies, game.engine),
         ...(0, turnStart_1.turnStartRules)(exports.PREFIX, dependencies, pairs),

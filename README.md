@@ -93,8 +93,10 @@ proposals.
   player's next audience (`WITHDRAWAL_DEMANDED`) rather than at once; the units it counted are saved for it.
 - **Calls for help** (`diplo_ally_demand_help`) likewise wait for the next audience (`CallForHelpRecord`).
 - **Computer players meeting** decide at most once per pair each turn, when their land units meet on land; the original
-  decides at every meeting. Which pairs met this turn is kept for the session, not saved, so a reload can decide once
-  more that turn. Losing contact removes the pair's `Contact`, allies' too, as the original clears the bit.
+  decides at every meeting. Which pairs met this turn is a turn bit of our own (`COMPUTERS_MET`), saved. They make
+  contact only this way: base-diplomacy's contact rule is replaced by one for a person's units, and a computer
+  player's unit meeting a person's makes contact whenever it is lost. Losing contact removes the pair's `Contact`,
+  allies' too, as the original clears the bit.
 - **Wonders:** the blocking-wonder refusal of an exchange reads the wonder the computer player is building, but doesn't
   compare the players' wonders in the wonder's group of seven.
 - **A computer player's sneak attack on a person** brings the person's computer allies in (`diplo_allies_join_war`)

@@ -118,19 +118,34 @@ const othersOf = (dependencies: Dependencies, player: Player): Player[] =>
 const incidents = new WeakMap<Player, Map<Player, number>>();
 
 // The units counted as intruders (`UNITF_BORDER_INTRUDER`): one counts once, whoever's borders it is in, until its
-//  owner's next turn or until a review with no incident clears every mark (`diplomacy.cpp:6695-6702`). The mark is
-//  for the turn only, so it is kept for the session.
-const intruderMarks = new WeakMap<Unit, { turn: number; generation: number }>();
-let markGeneration = 0;
+//  owner's next turn (`unit.cpp:978`) or until a review with no incident clears every mark (`diplomacy.cpp:6695-6702`).
+//  The mark lasts a round at most, so it isn't saved; it is kept per game (by its unit registry).
+interface Marks {
+  units: WeakMap<Unit, number>;
+  generation: number;
+}
 
-const marked = (unit: Unit, turn: number): boolean => {
-  const mark = intruderMarks.get(unit);
+const marksByGame = new WeakMap<object, Marks>();
 
-  return (
-    mark !== undefined &&
-    mark.turn === turn &&
-    mark.generation === markGeneration
-  );
+const marksOf = (dependencies: Dependencies): Marks => {
+  const key = dependencies.unitRegistry as unknown as object,
+    marks = marksByGame.get(key) ?? { units: new WeakMap(), generation: 0 };
+
+  marksByGame.set(key, marks);
+
+  return marks;
+};
+
+const marked = (dependencies: Dependencies, unit: Unit): boolean => {
+  const marks = marksOf(dependencies);
+
+  return marks.units.get(unit) === marks.generation;
+};
+
+const mark = (dependencies: Dependencies, unit: Unit): void => {
+  const marks = marksOf(dependencies);
+
+  marks.units.set(unit, marks.generation);
 };
 
 /** Whether the unit with `id` of `player`'s is marked as intruding now. */
@@ -138,16 +153,27 @@ export const intruding = (
   dependencies: Dependencies,
   player: Player
 ): ((id: string) => boolean) => {
-  const turn = dependencies.turn.value(),
-    units = dependencies.unitRegistry.getByPlayer(player);
+  const units = dependencies.unitRegistry.getByPlayer(player);
 
   return (id: string) =>
-    units.some((unit: Unit) => unit.id() === id && marked(unit, turn));
+    units.some((unit: Unit) => unit.id() === id && marked(dependencies, unit));
 };
 
-// The original's unit owner's turn ends the marks: here, a new turn does, or `clearMarks`.
-const clearMarks = (): void => {
-  markGeneration++;
+// A review with no incident clears every unit's mark.
+const clearMarks = (dependencies: Dependencies): void => {
+  marksOf(dependencies).generation++;
+};
+
+/** The start of `player`'s turn clears its own units' marks (`units_reset_for_turn`, `unit.cpp:978`). */
+export const clearOwnMarks = (
+  dependencies: Dependencies,
+  player: Player
+): void => {
+  const marks = marksOf(dependencies);
+
+  dependencies.unitRegistry
+    .getByPlayer(player)
+    .forEach((unit: Unit) => marks.units.delete(unit));
 };
 
 /** The drift's starting value for `computer` toward `intruder` this turn, if `border-intruders` counted an incident. */
@@ -178,8 +204,7 @@ export const borderIntruders = (
   intruder: Player,
   everySquare: boolean
 ): Intrusion => {
-  const intrusion: Intrusion = { weight: 0, repeat: 0, units: [] },
-    turn = dependencies.turn.value();
+  const intrusion: Intrusion = { weight: 0, repeat: 0, units: [] };
 
   if (allied(dependencies, holder, intruder)) {
     return intrusion;
@@ -234,7 +259,7 @@ export const borderIntruders = (
           (unit: Unit) =>
             unit.player() === intruder &&
             unit.attack().value() > 0 &&
-            !marked(unit, turn)
+            !marked(dependencies, unit)
         )
         .forEach((unit: Unit) => {
           if (warned(dependencies, unit)) {
@@ -243,7 +268,7 @@ export const borderIntruders = (
             warn(dependencies, unit);
           }
 
-          intruderMarks.set(unit, { turn, generation: markGeneration });
+          mark(dependencies, unit);
           intrusion.units.push(unit);
           intruders++;
           intrusion.weight += 1 + improvementWeight(tile);
@@ -268,7 +293,8 @@ const recentPeace = new WeakMap<Player, Set<Player>>();
 
 /**
  * The border incidents `computer` counts at the start of its turn (`diplo_review_border_incident`, `:6418-6515`),
- *  toward each person it is in contact with, neither allied nor at war:
+ *  toward each person it is in contact with (counted, marking and warning units, even at war, but only
+ *  reviewed when neither):
  *
  * - without peace: the incident's weight starts the drift; with repeat offences (and a vendetta counting as one) above
  *   2 less the person's reputation, a roll of the reputation + repeats over 1 sets hostile intent both ways;
@@ -276,7 +302,7 @@ const recentPeace = new WeakMap<Player, Set<Player>>();
  *   that the units counted leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
  * - a treaty signed last turn, or (at peace) contact in the last 2 turns, counts no incident.
  *
- * With no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
+ * With a person reviewed and no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
  */
 export const countIncidents = (
   dependencies: Dependencies,
@@ -293,75 +319,79 @@ export const countIncidents = (
 
   let incident = false;
 
-  othersOf(dependencies, computer)
-    .filter(
-      (person: Player) =>
-        human(dependencies, person) &&
-        inContact(dependencies, computer, person) &&
-        !allied(dependencies, computer, person) &&
-        !atWar(dependencies, computer, person)
-    )
-    .forEach((person: Player) => {
-      const intrusion = borderIntruders(
-        dependencies,
-        computer,
-        person,
-        everySquare
-      );
+  // Every person it is in contact with is reviewed (`civ.cpp:7202-7205`); the count marks and warns their units even
+  //  at war (not an ally's: `borderIntruders`), and is then set aside (`diplo_review_border_incident`, `:6430-6432`).
+  const reviewed = othersOf(dependencies, computer).filter(
+    (person: Player) =>
+      human(dependencies, person) && inContact(dependencies, computer, person)
+  );
 
-      if (intrusion.weight === 0) {
-        return;
-      }
+  reviewed.forEach((person: Player) => {
+    const intrusion = borderIntruders(
+      dependencies,
+      computer,
+      person,
+      everySquare
+    );
 
-      if (!hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)) {
-        if (recent(person)) {
-          incident = true;
+    if (
+      intrusion.weight === 0 ||
+      allied(dependencies, computer, person) ||
+      atWar(dependencies, computer, person)
+    ) {
+      return;
+    }
 
-          return;
-        }
-
-        let repeat = intrusion.repeat;
-
-        if (vendetta(dependencies, computer, person)) {
-          repeat++;
-        }
-
-        const odds = reputation(dependencies).get(person) + repeat;
-
-        if (odds > 2 && roll(random, odds) > 1) {
-          setBoth(dependencies, computer, person, HOSTILE_INTENT);
-        }
-
-        counted.set(person, intrusion.weight);
-
-        return;
-      }
-
-      const last = lastContact(dependencies, computer, person);
-
-      if (
-        recent(person) ||
-        (last !== undefined && last < turn && turn - last < 3)
-      ) {
+    if (!hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)) {
+      if (recent(person)) {
         incident = true;
 
         return;
       }
 
-      if (intrusion.repeat === 0) {
-        incident = true;
-        counted.set(person, intrusion.weight - 1);
+      let repeat = intrusion.repeat;
 
-        return;
+      if (vendetta(dependencies, computer, person)) {
+        repeat++;
       }
 
-      noteIntruders(dependencies, computer, person, intrusion.units);
-      setFlag(dependencies, computer, person, WITHDRAWAL_DEMANDED | INCIDENT);
-      engine?.emit('civ2-diplomacy:audience-due', computer, person);
-    });
+      const odds = reputation(dependencies).get(person) + repeat;
 
-  if (!incident) {
-    clearMarks();
+      if (odds > 2 && roll(random, odds) > 1) {
+        setBoth(dependencies, computer, person, HOSTILE_INTENT);
+      }
+
+      counted.set(person, intrusion.weight);
+
+      return;
+    }
+
+    const last = lastContact(dependencies, computer, person);
+
+    if (
+      recent(person) ||
+      (last !== undefined && last < turn && turn - last < 3)
+    ) {
+      incident = true;
+
+      return;
+    }
+
+    if (intrusion.repeat === 0) {
+      incident = true;
+      counted.set(person, intrusion.weight - 1);
+
+      return;
+    }
+
+    noteIntruders(dependencies, computer, person, intrusion.units);
+    setFlag(dependencies, computer, person, WITHDRAWAL_DEMANDED | INCIDENT);
+    engine?.emit('civ2-diplomacy:audience-due', computer, person);
+  });
+
+  // A review with no incident clears the marks; with no person to review, there was no review.
+  if (reviewed.length > 0 && !incident) {
+    clearMarks(dependencies);
   }
 
   incidents.set(computer, counted);
@@ -1232,6 +1262,7 @@ export const turnStartRules = (
           clearFlag(dependencies, player, record.toward(), TURN_BITS)
         );
         forgetWarnings(dependencies, player, intruding(dependencies, player));
+        clearOwnMarks(dependencies, player);
       })
     ),
     new TurnStart(

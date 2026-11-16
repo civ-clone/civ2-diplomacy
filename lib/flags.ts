@@ -47,8 +47,13 @@ export const CITY_CAPTURED = 0x400000;
 /** They met this turn (`TREATY_MET_THIS_TURN`); cleared at the start of the turn. */
 export const MET_THIS_TURN = 0x800000;
 
-/** The bits cleared at the start of every turn (`civ.cpp:7080`, `& 0xff5fbfff`). */
-export const TURN_BITS = CHANGED_THIS_TURN | WAR_THIS_TURN | MET_THIS_TURN;
+/** Two computer players' units met this turn and they decided what to do (`diplo_civs_meet`): our own bit, so a pair
+ *  decides once a turn, kept in a save. */
+export const COMPUTERS_MET = 0x2000000;
+
+/** The bits cleared at the start of every turn (`civ.cpp:7080`, `& 0xff5fbfff`), and our own `COMPUTERS_MET`. */
+export const TURN_BITS =
+  CHANGED_THIS_TURN | WAR_THIS_TURN | MET_THIS_TURN | COMPUTERS_MET;
 
 /** What signing a ceasefire, a peace or an alliance clears both ways (`diplo_set_treaty_flags`, `0x2a60`, less war). */
 export const SIGNING_CLEARS = AGGRESSOR | FIGHTING | BROKEN | HOSTILE_INTENT;

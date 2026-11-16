@@ -87,7 +87,10 @@ export declare const expireSilently: (
   },
   by: Player
 ) => void;
-/** `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). */
+/**
+ * `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). One in that
+ *  city already stays there, its orders dropped, and counts as sent, as the original's does.
+ */
 export declare const sendHome: (
   dependencies: Dependencies,
   unit: Unit

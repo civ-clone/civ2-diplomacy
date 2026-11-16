@@ -24,7 +24,6 @@ import baseDetonatedRules from '@civ-clone/base-diplomacy/lib/rules/detonated';
 import baseInteractionRules from '@civ-clone/base-diplomacy/lib/rules/interaction';
 import { civ2SenateIntervenes } from './lib/senate';
 import mayNegotiateRules from '@civ-clone/base-diplomacy/lib/rules/mayNegotiate';
-import movedRules from '@civ-clone/base-diplomacy/lib/rules/moved';
 import readers from './lib/readers';
 import { senateGovernment } from './lib/senate';
 import { spacing } from './lib/numbers';
@@ -105,7 +104,6 @@ export const getRules = (
     ...terminatedRules(PREFIX, dependencies, meeting),
     ...baseDetonatedRules(PREFIX, dependencies),
     ...detonatedRules(PREFIX, dependencies),
-    ...movedRules(dependencies.interactionRegistry, dependencies.unitRegistry),
     ...createdRules(PREFIX, dependencies, random),
     ...declaredWarRules(PREFIX, dependencies, game.engine),
     ...turnStartRules(PREFIX, dependencies, pairs),

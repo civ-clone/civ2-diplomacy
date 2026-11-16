@@ -30,7 +30,8 @@ export const REPUTATION_MINIMUM = 0;
 
 // The talks under way: a computer player's attitude in talks (`diplo_eval.cur_attitude`) moves with every change to
 //  its attitude toward the person it is talking to, as `civ_adjust_attitude` moves it (`civ.cpp:2966-2975`).
-const inTalks = new Map<Player, { toward: Player; value: number }>();
+//  Weakly held, so talks a client leaves without ending never keep a player alive.
+const inTalks = new WeakMap<Player, { toward: Player; value: number }>();
 
 /**
  * While `holder` talks with `toward`, its attitude in talks is `live.value`, and every `adjust` of its attitude toward

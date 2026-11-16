@@ -16,6 +16,7 @@ import {
   makePeace,
 } from '@civ-clone/base-diplomacy/lib/declareWar';
 import Advance from '@civ-clone/core-science/Advance';
+import DiplomaticMissions from '@civ-clone/base-unit-trait-diplomatic-missions/DiplomaticMissions';
 import TradeMissions from '@civ-clone/base-unit-trait-trade-missions/TradeMissions';
 import War from '@civ-clone/base-diplomacy-declaration-war/War';
 import { activeDeclarations } from '@civ-clone/base-diplomacy/lib/declareWar';
@@ -149,6 +150,15 @@ const waterBody = (start: Tile): Set<Tile> => {
 const tradeUnit = (unit: Unit): boolean => {
   try {
     return unit.hasTrait(TradeMissions);
+  } catch (e) {
+    return false;
+  }
+};
+
+// A diplomat or a spy (the original's role 6).
+const diplomaticUnit = (unit: Unit): boolean => {
+  try {
+    return unit.hasTrait(DiplomaticMissions);
   } catch (e) {
     return false;
   }
@@ -316,7 +326,10 @@ export const expireSilently = (
   declaration.expire(by);
 };
 
-/** `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). */
+/**
+ * `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). One in that
+ *  city already stays there, its orders dropped, and counts as sent, as the original's does.
+ */
 export const sendHome = (dependencies: Dependencies, unit: Unit): boolean => {
   const [home] = dependencies.cityRegistry
     .getByPlayer(unit.player())
@@ -327,13 +340,16 @@ export const sendHome = (dependencies: Dependencies, unit: Unit): boolean => {
     .sort(([, a], [, b]) => a - b)
     .map(([city]) => city);
 
-  if (home === undefined || home.tile() === unit.tile()) {
+  if (home === undefined) {
     return false;
   }
 
-  unit.setTile(home.tile());
+  if (home.tile() !== unit.tile()) {
+    unit.setTile(home.tile());
+    unit.applyVisibility();
+  }
+
   unit.setStatus(null);
-  unit.applyVisibility();
 
   return true;
 };
@@ -357,6 +373,7 @@ export const withdrawUnits = (
         !unit.tile().isWater() &&
         unit.attack().value() + unit.defence().value() > 0 &&
         !tradeUnit(unit) &&
+        !diplomaticUnit(unit) &&
         cities.some((city: City) => unit.tile().distanceFrom(city.tile()) < 3)
     )
     .filter((unit: Unit) => sendHome(dependencies, unit)).length;

@@ -14,6 +14,11 @@ export declare const intruding: (
   dependencies: Dependencies,
   player: Player
 ) => (id: string) => boolean;
+/** The start of `player`'s turn clears its own units' marks (`units_reset_for_turn`, `unit.cpp:978`). */
+export declare const clearOwnMarks: (
+  dependencies: Dependencies,
+  player: Player
+) => void;
 /** The drift's starting value for `computer` toward `intruder` this turn, if `border-intruders` counted an incident. */
 export declare const incidentWeight: (
   computer: Player,
@@ -39,7 +44,8 @@ export declare const borderIntruders: (
 ) => Intrusion;
 /**
  * The border incidents `computer` counts at the start of its turn (`diplo_review_border_incident`, `:6418-6515`),
- *  toward each person it is in contact with, neither allied nor at war:
+ *  toward each person it is in contact with (counted, marking and warning units, even at war, but only
+ *  reviewed when neither):
  *
  * - without peace: the incident's weight starts the drift; with repeat offences (and a vendetta counting as one) above
  *   2 less the person's reputation, a roll of the reputation + repeats over 1 sets hostile intent both ways;
@@ -47,7 +53,7 @@ export declare const borderIntruders: (
  *   that the units counted leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
  * - a treaty signed last turn, or (at peace) contact in the last 2 turns, counts no incident.
  *
- * With no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
+ * With a person reviewed and no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
  */
 export declare const countIncidents: (
   dependencies: Dependencies,

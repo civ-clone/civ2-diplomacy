@@ -48,6 +48,7 @@
     "@civ-clone/base-unit-action-establish-embassy": "^0.1.0",
     "@civ-clone/base-unit-action-nuclear-attack": "^0.1.0",
     "@civ-clone/base-unit-trait-detonates": "^0.1.0",
+    "@civ-clone/base-unit-trait-diplomatic-missions": "^0.1.0",
     "@civ-clone/base-unit-trait-trade-missions": "^0.1.0",
     "@civ-clone/base-wonder": "^0.1.1",
     "@civ-clone/base-wonder-eiffeltower": "^0.1.0",
