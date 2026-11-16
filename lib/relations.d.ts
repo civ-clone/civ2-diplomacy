@@ -18,9 +18,23 @@ export declare const ATTITUDE_MAXIMUM = 100;
 /** The lowest reputation: the best. The original keeps it in a byte with no other limit. */
 export declare const REPUTATION_MINIMUM = 0;
 /**
+ * While `holder` talks with `toward`, its attitude in talks is `live.value`, and every `adjust` of its attitude toward
+ *  `toward` adds to it, unclamped, as the original's does. `endTalks` stops it.
+ */
+export declare const beginTalks: (
+  holder: Player,
+  toward: Player,
+  live: {
+    value: number;
+  }
+) => void;
+/** `holder`'s talks are over. */
+export declare const endTalks: (holder: Player) => void;
+/**
  * The game's attitudes: `attitude(registries).get(holder, toward)` is how `holder` feels about `toward`, 0 (warmest)
  *  to 100 (coldest), or `undefined` before they've met. A new attitude is seeded when contact is made
- *  (`civ2-diplomacy:interaction/created/seed-attitude`), so change one with `adjust` only once the pair has met.
+ *  (`civ2-diplomacy:interaction/created/seed-attitude`), so change one with `adjust` only once the pair has met. An
+ *  `adjust` during talks also moves the computer player's attitude in those talks.
  */
 export declare const attitude: ({
   interactionRegistry,

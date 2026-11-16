@@ -22,6 +22,7 @@ import Player from '@civ-clone/core-player/Player';
 import Trait from '@civ-clone/core-civilization/Trait';
 import { hasVendetta } from '@civ-clone/library-diplomacy/lib/holds';
 import isHuman from '@civ-clone/civ2-difficulty/isHuman';
+import { rankings } from '@civ-clone/core-power/lib/rank';
 import { levelOf } from '@civ-clone/civ2-difficulty/level';
 
 // What Civilization II's talks read about the players, in the original's terms (OpenCiv2 `diplomacy.cpp`): the power
@@ -141,7 +142,10 @@ export const vendetta = (
   against: Player
 ): boolean => hasVendetta(holder, against, dependencies.interactionRegistry);
 
-/** `diplo_is_hostile`: at war, or at contact only (no ceasefire, peace or alliance) with an attitude above 49. */
+/**
+ * `diplo_is_hostile` (`diplomacy.cpp:4216`): at war; or, neither allied nor at peace (a ceasefire counts as neither),
+ *  in contact with an attitude above 49.
+ */
 export const hostile = (
   dependencies: Dependencies,
   player: Player,
@@ -155,7 +159,7 @@ export const hostile = (
   }
 
   return (
-    level === TreatyLevel.Contact &&
+    (level === TreatyLevel.Contact || level === TreatyLevel.Ceasefire) &&
     inContact(dependencies, player, other) &&
     attitudeOf(player, other) > 49
   );
@@ -169,3 +173,30 @@ export const others = (
   dependencies.playerRegistry
     .entries()
     .filter((player: Player) => !players.includes(player));
+
+/**
+ * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3118`, `GAME_AI_GANG_UP`): the
+ *  top-ranked player, when a person, with more than 4 cities and no nuclear weapons, after turn 200 and above
+ *  Chieftain; else `null`. The original also alerts them, above King, to a person whose spaceship has launched: not
+ *  ported (no spaceships yet).
+ */
+export const gangUpLeader = (
+  dependencies: Dependencies,
+  nuclear: (player: Player) => number
+): Player | null => {
+  if (dependencies.turn.value() <= 200 || level(dependencies) === CHIEFTAIN) {
+    return null;
+  }
+
+  const [leader] = rankings(
+    dependencies.playerRegistry.entries(),
+    dependencies.ruleRegistry
+  );
+
+  return leader !== undefined &&
+    human(dependencies, leader) &&
+    cities(dependencies, leader) > 4 &&
+    nuclear(leader) === 0
+    ? leader
+    : null;
+};

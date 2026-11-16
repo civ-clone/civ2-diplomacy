@@ -52,8 +52,9 @@ export const senateRecord = (
     );
 
 /**
- * The start of `player`'s turn: a new roll, 0 to 99, and one turn in three the Republic's Senate goes in or out of
- *  session (`civ.cpp:7069-7073`). Nothing is kept for a player whose government has never had a Senate.
+ * The start of `player`'s turn: a new roll, 0 to 99, and one turn in three the Senate goes in or out of session
+ *  (`civ.cpp:7069-7073`), whatever the government, so the session is the same walk from the start of the game as the
+ *  original's.
  */
 export const rollSenate = (
   dependencies: Dependencies,
@@ -67,10 +68,6 @@ export const rollSenate = (
   if (record !== undefined) {
     record.set(roll, toggle ? !record.inSession() : record.inSession());
 
-    return;
-  }
-
-  if (senateGovernment(dependencies, player) === 'none') {
     return;
   }
 

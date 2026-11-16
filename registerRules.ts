@@ -22,7 +22,6 @@ import { SENATE_RULE } from './RuleIds';
 import SenateIntervenes from '@civ-clone/base-government-senate/Rules/SenateIntervenes';
 import baseDetonatedRules from '@civ-clone/base-diplomacy/lib/rules/detonated';
 import baseInteractionRules from '@civ-clone/base-diplomacy/lib/rules/interaction';
-import baseResolvedRules from '@civ-clone/base-diplomacy/lib/rules/resolved';
 import { civ2SenateIntervenes } from './lib/senate';
 import mayNegotiateRules from '@civ-clone/base-diplomacy/lib/rules/mayNegotiate';
 import movedRules from '@civ-clone/base-diplomacy/lib/rules/moved';
@@ -31,10 +30,12 @@ import { senateGovernment } from './lib/senate';
 import { spacing } from './lib/numbers';
 import talks from './lib/talks';
 import { turnStartRules } from './lib/rules/turnStart';
+import civsMeetRules from './lib/rules/civsMeet';
 
 export const PREFIX = 'civ2-diplomacy';
 
 export const dependenciesOf = (game: Game): Dependencies => ({
+  cityBuildRegistry: game.cityBuilds,
   cityRegistry: game.cities,
   clientRegistry: game.clients,
   gameDifficultyRegistry: game.difficulty,
@@ -80,7 +81,13 @@ export const getRules = (
     random = game.rng,
     meeting = talks({ dependencies, random }),
     republican = (player: Player): boolean =>
-      senateGovernment(dependencies, player) !== 'none';
+      senateGovernment(dependencies, player) !== 'none',
+    pairs = {
+      random,
+      nuclear: read.nuclear,
+      republican,
+      engine: game.engine,
+    };
 
   return [
     ...expiredRules(PREFIX, game.engine),
@@ -93,25 +100,16 @@ export const getRules = (
     ...proposalAvailableRules(PREFIX, dependencies, republican),
     ...mayNegotiateRules(PREFIX, dependencies, read.isHuman, spacing),
     ...resolvedRules(PREFIX, dependencies, game.engine, random),
-    ...kept(
-      baseResolvedRules(PREFIX, dependencies, random, 0),
-      'proposal/resolved/tribute',
-      'proposal/resolved/exchange-knowledge'
-    ),
-    ...attitudeRules(PREFIX, dependencies, meeting),
-    ...dialogueRules(PREFIX, dependencies, game.engine),
+    ...attitudeRules(PREFIX, dependencies),
+    ...dialogueRules(PREFIX, dependencies, game.engine, random),
     ...terminatedRules(PREFIX, dependencies, meeting),
     ...baseDetonatedRules(PREFIX, dependencies),
     ...detonatedRules(PREFIX, dependencies),
     ...movedRules(dependencies.interactionRegistry, dependencies.unitRegistry),
     ...createdRules(PREFIX, dependencies, random),
     ...declaredWarRules(PREFIX, dependencies, game.engine),
-    ...turnStartRules(PREFIX, dependencies, {
-      random,
-      nuclear: read.nuclear,
-      republican,
-      engine: game.engine,
-    }),
+    ...turnStartRules(PREFIX, dependencies, pairs),
+    ...civsMeetRules(PREFIX, dependencies, pairs),
     new SenateIntervenes(
       SENATE_RULE,
       new Effect((player: Player, other: Player | null, context): boolean =>

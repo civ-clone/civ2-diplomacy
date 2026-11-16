@@ -9,7 +9,6 @@ const RuleIds_1 = require("./RuleIds");
 const SenateIntervenes_1 = require("@civ-clone/base-government-senate/Rules/SenateIntervenes");
 const detonated_1 = require("@civ-clone/base-diplomacy/lib/rules/detonated");
 const interaction_1 = require("@civ-clone/base-diplomacy/lib/rules/interaction");
-const resolved_1 = require("@civ-clone/base-diplomacy/lib/rules/resolved");
 const senate_1 = require("./lib/senate");
 const mayNegotiate_1 = require("@civ-clone/base-diplomacy/lib/rules/mayNegotiate");
 const moved_1 = require("@civ-clone/base-diplomacy/lib/rules/moved");
@@ -18,8 +17,10 @@ const senate_2 = require("./lib/senate");
 const numbers_1 = require("./lib/numbers");
 const talks_2 = require("./lib/talks");
 const turnStart_1 = require("./lib/rules/turnStart");
+const civsMeet_1 = require("./lib/rules/civsMeet");
 exports.PREFIX = 'civ2-diplomacy';
 const dependenciesOf = (game) => ({
+    cityBuildRegistry: game.cityBuilds,
     cityRegistry: game.cities,
     clientRegistry: game.clients,
     gameDifficultyRegistry: game.difficulty,
@@ -54,7 +55,12 @@ const kept = (rules, ...names) => rules.filter((rule) => names.some((name) => ru
  * - contact when units meet, when talks open and when an embassy is made.
  */
 const getRules = (dependencies, game) => {
-    const read = (0, readers_1.default)(dependencies), random = game.rng, meeting = (0, talks_2.default)({ dependencies, random }), republican = (player) => (0, senate_2.senateGovernment)(dependencies, player) !== 'none';
+    const read = (0, readers_1.default)(dependencies), random = game.rng, meeting = (0, talks_2.default)({ dependencies, random }), republican = (player) => (0, senate_2.senateGovernment)(dependencies, player) !== 'none', pairs = {
+        random,
+        nuclear: read.nuclear,
+        republican,
+        engine: game.engine,
+    };
     return [
         ...(0, relations_1.expiredRules)(exports.PREFIX, game.engine),
         ...kept((0, interaction_1.default)(exports.PREFIX, dependencies), 'negotiation/interaction/register'),
@@ -63,21 +69,16 @@ const getRules = (dependencies, game) => {
         ...(0, talks_1.proposalAvailableRules)(exports.PREFIX, dependencies, republican),
         ...(0, mayNegotiate_1.default)(exports.PREFIX, dependencies, read.isHuman, numbers_1.spacing),
         ...(0, talks_1.resolvedRules)(exports.PREFIX, dependencies, game.engine, random),
-        ...kept((0, resolved_1.default)(exports.PREFIX, dependencies, random, 0), 'proposal/resolved/tribute', 'proposal/resolved/exchange-knowledge'),
-        ...(0, talks_1.attitudeRules)(exports.PREFIX, dependencies, meeting),
-        ...(0, talks_1.dialogueRules)(exports.PREFIX, dependencies, game.engine),
+        ...(0, talks_1.attitudeRules)(exports.PREFIX, dependencies),
+        ...(0, talks_1.dialogueRules)(exports.PREFIX, dependencies, game.engine, random),
         ...(0, talks_1.terminatedRules)(exports.PREFIX, dependencies, meeting),
         ...(0, detonated_1.default)(exports.PREFIX, dependencies),
         ...(0, relations_1.detonatedRules)(exports.PREFIX, dependencies),
         ...(0, moved_1.default)(dependencies.interactionRegistry, dependencies.unitRegistry),
         ...(0, relations_1.createdRules)(exports.PREFIX, dependencies, random),
         ...(0, relations_1.declaredWarRules)(exports.PREFIX, dependencies, game.engine),
-        ...(0, turnStart_1.turnStartRules)(exports.PREFIX, dependencies, {
-            random,
-            nuclear: read.nuclear,
-            republican,
-            engine: game.engine,
-        }),
+        ...(0, turnStart_1.turnStartRules)(exports.PREFIX, dependencies, pairs),
+        ...(0, civsMeet_1.default)(exports.PREFIX, dependencies, pairs),
         new SenateIntervenes_1.default(RuleIds_1.SENATE_RULE, new Effect_1.default((player, other, context) => (0, senate_1.civ2SenateIntervenes)(dependencies, player, other, context))),
     ];
 };

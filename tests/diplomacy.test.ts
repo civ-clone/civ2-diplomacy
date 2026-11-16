@@ -34,11 +34,13 @@ describe('civ2-diplomacy', (): void => {
       BORDER_INTRUDERS_RULE,
       TREATY_BREAKING_RULE,
       SENATE_RULE,
-      'civ2-diplomacy:proposal/resolved/tribute',
-      'civ2-diplomacy:proposal/resolved/exchange-knowledge',
+      'civ2-diplomacy:proposal/resolved/answer',
+      'civ2-diplomacy:proposal/resolved/agenda',
       'civ2-diplomacy:declared-war/reputation',
+      'civ2-diplomacy:unit/moved/computers-meet',
     ]);
     expect(ids).not.include('civ2-diplomacy:proposal/resolved/cancel-treaty');
+    expect(ids).not.include('civ2-diplomacy:proposal/resolved/tribute');
     expect(ids).not.include('civ2-diplomacy:player/turn-start/drop-sham-peace');
     expect(new Set(ids.filter((id) => id !== null)).size).equal(
       ids.filter((id) => id !== null).length

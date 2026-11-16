@@ -14,12 +14,24 @@ export declare const DIALOGUE: {
   allyTaunts: string;
   senateForcedCeasefire: string;
   senateForcedPeace: string;
-  withdrawn: string;
+  helpRefused: string;
+  violatorsRefused: string;
 };
-export interface TalksRules {
-  dependencies: Dependencies;
-  random: () => number;
-}
+/** The computer player's business, in the original's order. */
+export declare const AGENDA: {
+  callForHelp: number;
+  violators: number;
+  exchange: number;
+  warOnTarget: number;
+  tribute: number;
+  tech: number;
+  dismissal: number;
+  threat: number;
+  alliance: number;
+  ceasefire: number;
+  peace: number;
+  done: number;
+};
 export interface Sides {
   computer: Player;
   person: Player;
@@ -30,57 +42,124 @@ export declare const sidesOf: (
   dependencies: Dependencies,
   negotiation: Negotiation
 ) => Sides | null;
-/** The computer player's evaluation, made the first time the meeting asks for it. */
-export declare const evaluationOf: (
+/** One meeting's state: the original's `diplo_eval` and `diplo_ai_meet_player_talk`'s locals. */
+export interface Meeting {
+  sides: Sides;
+  evaluation: Evaluation;
+  live: {
+    value: number;
+  };
+  aggressive: boolean;
+  declareWar: boolean;
+  warTarget: Player | null;
+  tribute: number;
+  fear: number;
+  hadCeasefire: boolean;
+  noContact: boolean;
+  lastContactTurn: number | null;
+  hostile: boolean;
+  paid: boolean;
+  propose: boolean;
+  declaredWar: boolean;
+  treatyMade: boolean;
+  senateBlocked: boolean;
+  conceded: boolean;
+  ended: boolean;
+  gifts: number;
+}
+/** The meeting's state, made when it opens (`begin`), or `null` for a meeting that isn't between a computer and a person. */
+export declare const meetingOf: (negotiation: Negotiation) => Meeting | null;
+/**
+ * Opens the meeting (`diplo_ai_meet_player`, `:4017-4080`), before anything is said: the computer player's evaluation
+ *  of the person, its attitude in talks made live, and what held as it opened. A computer player's own audience resets
+ *  its patience (and ends any ceasefire: `Rules/talks`); a person who started a war with it finds it out of patience,
+ *  and one with an incident to answer finds it patient.
+ */
+export declare const begin: (
   dependencies: Dependencies,
-  negotiation: Negotiation,
-  { computer, person }: Sides
-) => Evaluation;
+  negotiation: Negotiation
+) => Meeting | null;
 /** The agenda item a step of the computer player's was (`AGENDA`), or `undefined`. */
 export declare const agendaItemOf: (action: object) => number | undefined;
-/** The person's proposal a computer player's ask belongs to, or `null`. */
+/** The proposal a computer player's ask belongs to, or `null`. */
 export declare const askedFor: (action: object) => IProposal | null;
-/** The agenda, in the original's order. */
-export declare const AGENDA: {
-  exchange: number;
-  warOnTarget: number;
-  tribute: number;
-  tech: number;
-  dismissal: number;
-  threat: number;
-  alliance: number;
-  ceasefire: number;
-  peace: number;
-  menu: number;
-};
-/** How the computer player answers one of the person's proposals. */
-export interface Plan {
-  asks: (() => IProposal | null)[];
-  offIfRefused: (index: number) => boolean;
-  accept: boolean;
-  thenSays: string | null;
+/** What a proposal's answer brings, worked out with the answer and carried out by `Rules/talks`. */
+export interface Outcome {
+  patience?: number;
+  end?: boolean;
+  says?: string | null;
+  gives?: (Advance | Gold)[];
+  takes?: Advance | null;
+  attitude?: number;
+  ceasefire?: boolean;
+  withdraws?: boolean;
+  war?: boolean;
+  cancelsAlliance?: boolean;
+  alsoTakes?: Advance[];
 }
-/** What the computer player gives for the person's `AskAlly`, if it agreed. */
-export declare const allyGiftFor: (
-  proposal: IProposal
-) => Advance | Gold | null;
+/** What answering `action` brings, if anything (`Outcome`). */
+export declare const outcomeOf: (action: object) => Outcome;
+/**
+ * A computer player's payment to its ally for joining its war on `enemy` (`diplo_ally_demand_help`, `:1300-1320`): the
+ *  threat `enemy` poses where it has cities, in 50s, up to what it has.
+ */
+export declare const helpBonus: (
+  dependencies: Dependencies,
+  computer: Player,
+  enemy: Player
+) => number;
+/** Whether the person's Senate made it accept `proposal`. */
+export declare const wasForced: (proposal: object) => boolean;
+/** How the computer player answers the person's proposal, ask by ask (`diplo_ai_answer_proposal` and the menus). */
+export interface Answer {
+  asks: (() => IProposal | null)[];
+  off: (index: number) => Outcome | null;
+  accept: boolean;
+  onAccept: Outcome;
+  onDecline: Outcome;
+}
+export interface TalksRules {
+  dependencies: Dependencies;
+  random: () => number;
+}
 export declare const talks: ({ dependencies, random }: TalksRules) => {
   computerStep: (negotiation: Negotiation) => IAction | null;
   personSteps: (negotiation: Negotiation) => IAction[];
-  planFor: (
+  menu: (negotiation: Negotiation, meeting: Meeting) => IProposal[];
+  answerTo: (
     negotiation: Negotiation,
-    sides: Sides,
+    meeting: Meeting,
     proposal: IProposal
-  ) => Plan;
-  menu: (negotiation: Negotiation, sides: Sides) => IProposal[];
-  evaluationOf: (negotiation: Negotiation, sides: Sides) => Evaluation;
-  allyGives: (negotiation: Negotiation, sides: Sides) => Advance | Gold | null;
-  personDemandTribute: (
-    negotiation: Negotiation,
-    sides: Sides,
-    proposal: 3 | 4 | 5
-  ) => number;
-  lastContactTurns: (computer: Player, person: Player) => number;
+  ) => Answer;
+  limitOf: (meeting: Meeting) => number;
+  exchange: (
+    meeting: Meeting,
+    mode: 0 | 1 | 2 | 3,
+    second?: boolean
+  ) =>
+    | {
+        kind: 'none';
+      }
+    | {
+        kind: 'refuse';
+      }
+    | {
+        kind: 'sell';
+        advance: Advance;
+        price: number;
+      }
+    | {
+        kind: 'gift';
+        advance: Advance;
+      }
+    | {
+        kind: 'petty';
+      }
+    | {
+        kind: 'offer';
+        takes: Advance;
+        value: number;
+      };
 };
 export type Talks = ReturnType<typeof talks>;
 export default talks;

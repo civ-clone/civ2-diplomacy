@@ -2,3 +2,4 @@
 //  classes, with base-diplomacy's `PatienceRecord` and `LastContactRecord` and core-diplomacy's records.
 export { SenateRecord } from './Records/SenateRecord';
 export { TreatyFlagsRecord } from './Records/TreatyFlagsRecord';
+export { CallForHelpRecord } from './Records/CallForHelpRecord';

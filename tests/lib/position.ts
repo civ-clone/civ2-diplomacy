@@ -14,6 +14,7 @@ import Republic from '@civ-clone/base-government-republic/Republic';
 import Resolution from '@civ-clone/core-diplomacy/Proposal/Resolution';
 import RuleRegistry from '@civ-clone/core-rule/RuleRegistry';
 import Tile from '@civ-clone/core-world/Tile';
+import Turn from '@civ-clone/core-turn-based-game/Turn';
 import Unit from '@civ-clone/core-unit/Unit';
 import { getRules } from '../../registerRules';
 
@@ -26,7 +27,12 @@ export interface Side {
   government?: 'republic' | 'democracy';
   advances?: (typeof Advance)[];
   wonders?: (new (...args: any[]) => object)[];
-  units?: { on: number | null; attack: number; defence: number }[];
+  units?: {
+    on: number | null;
+    attack: number;
+    defence: number;
+    nuclear?: boolean;
+  }[];
   cities?: number[];
 }
 
@@ -75,13 +81,13 @@ export const position = (
     units = new Map(
       players.map((player, index) => [
         player,
-        (sides[index].units ?? []).map(({ on, attack, defence }) =>
+        (sides[index].units ?? []).map(({ on, attack, defence, nuclear }) =>
           Object.assign(Object.create(Unit.prototype), {
             attack: () => ({ value: () => attack }),
             defence: () => ({ value: () => defence }),
             player: () => player,
             tile: () => (on === null ? sea : tiles[on][0]),
-            hasTrait: () => false,
+            hasTrait: () => nuclear === true,
           })
         ),
       ])
@@ -97,10 +103,12 @@ export const position = (
         })),
       ])
     ),
-    clock = { turn },
+    clock = new Turn(),
     wonders = new Map(
       players.map((player, index) => [player, sides[index].wonders ?? []])
     );
+
+  clock.set(turn);
 
   ruleRegistry.register(
     new MilitaryStrength(
@@ -164,7 +172,7 @@ export const position = (
     },
     ruleRegistry,
     traitRegistry: { getByLeader: () => [] },
-    turn: { value: () => clock.turn },
+    turn: clock,
     wonderRegistry: {
       getByPlayer: (player: Player) =>
         (wonders.get(player) ?? []).map((WonderType) =>

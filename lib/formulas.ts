@@ -462,66 +462,93 @@ export const warDistrust = (inputs: DistrustInputs): number => {
 };
 
 /**
- * Whether the computer player takes the person's money to declare war on the target (`diplo_favor_menu`): distrust
- *  below 7, or the target is no ally of its, it has no vendetta, the person fights the target and isn't outranked.
+ * Whether the computer player takes the person's money to declare war on the target (`diplo_favor_menu`, `:2420`):
+ *  distrust below 7, or the target is no ally of its, it holds no vendetta, the person fights the target and ranks no
+ *  higher than it (`power_rank[person] <= power_rank[target]`).
  */
 export const joinsWar = (
   distrust: number,
   targetIsComputersAlly: boolean,
   vendetta: boolean,
   personAtWarWithTarget: boolean,
-  personOutrankedByTarget: boolean
+  personRank: number,
+  targetRank: number
 ): boolean =>
   distrust < 7 ||
   (!targetIsComputersAlly &&
     !vendetta &&
     personAtWarWithTarget &&
-    !personOutrankedByTarget);
+    personRank <= targetRank);
 
 export interface SellInputs {
+  // The computer player's value of the advance (`ai_advance_value`).
   value: number;
+  // How many players know it.
   knowers: number;
+  // The computer player's attitude in talks.
   attitude: number;
-  personTopPowerAfter200: boolean;
-  level: number;
+  // The person is the top power (rank 7) with more than 4 cities, after turn 200, and not on Chieftain.
+  personTopPower: boolean;
   personGold: number;
   allied: boolean;
-  personBehind: boolean;
-  personFarBehind: boolean;
+  personAdvances: number;
+  computerAdvances: number;
 }
 
-/** `diplo_offer_sell_tech` (`:647`): the price of an advance. */
+/**
+ * `diplo_offer_sell_tech` (`:647-705`): the price of an advance: its value × 20, × attitude / 50 above 50, doubled for
+ *  the top power, divided among those who know it less one (at least 1), then × 10 (× 15 above 1500 gold, and a further
+ *  × 1½ above 3000); an ally pays half when behind, else ¾, and half again when 5 or more behind; at least 100.
+ */
 export const sellPrice = (inputs: SellInputs): number => {
-  let price = div(inputs.value * 200, Math.max(1, inputs.knowers - 1));
+  let price = inputs.value * 20;
 
   if (inputs.attitude > 50) {
-    price = div(price * inputs.attitude, 50);
+    price = div(inputs.attitude * price, 50);
   }
 
-  if (inputs.personTopPowerAfter200 && inputs.level !== CHIEFTAIN) {
-    price *= 2;
+  if (inputs.personTopPower) {
+    price <<= 1;
   }
 
-  price = div(price * (inputs.personGold > 1500 ? 15 : 10), 10);
+  const share = div(price, Math.max(1, inputs.knowers - 1));
+
+  price = share * 10;
+
+  if (inputs.personGold > 1500) {
+    price = div(share * 30, 2);
+  }
 
   if (inputs.personGold > 3000) {
     price = div(price * 3, 2);
   }
 
   if (inputs.allied) {
-    price = inputs.personBehind ? div(price, 2) : price - div(price, 4);
+    price =
+      inputs.personAdvances < inputs.computerAdvances
+        ? div(price, 2)
+        : price - (price >> 2);
 
-    if (inputs.personFarBehind) {
+    if (inputs.personAdvances + 4 < inputs.computerAdvances) {
       price = div(price, 2);
     }
   }
 
   if (price < 0) {
-    return 30000;
+    price = 30000;
   }
 
   return Math.max(100, price);
 };
+
+/** `diplo_gift_menu`'s gold (`:2560-2566`): a quarter, a half, three quarters and all, each a whole number of 50s. */
+export const giftGold = (gold: number): number[] =>
+  [1, 2, 3, 4]
+    .map((quarters) => div(quarters * div(gold, 50), 4) * 50)
+    .filter(
+      (amount, index, amounts) =>
+        amount > 0 && amounts.indexOf(amount) === index
+    );
 
 /** `diplo_senate_intervenes` (`:5410`): 0 below the Republic; the threshold the roll must reach. */
 export const senateThreshold = (

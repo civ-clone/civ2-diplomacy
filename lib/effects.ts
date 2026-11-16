@@ -1,8 +1,11 @@
 import {
-  CEASEFIRE_LINGERS,
+  AGGRESSOR,
   CHANGED_THIS_TURN,
+  SIGNING_CLEARS,
   TRIBUTE,
+  WAR_END_CLEARS,
   clearBoth,
+  clearFlag,
   setBoth,
 } from './flags';
 import {
@@ -13,80 +16,127 @@ import {
   makePeace,
 } from '@civ-clone/base-diplomacy/lib/declareWar';
 import Advance from '@civ-clone/core-science/Advance';
+import TradeMissions from '@civ-clone/base-unit-trait-trade-missions/TradeMissions';
+import War from '@civ-clone/base-diplomacy-declaration-war/War';
+import { activeDeclarations } from '@civ-clone/base-diplomacy/lib/declareWar';
+import { patience } from '@civ-clone/base-diplomacy/lib/patience';
 import City from '@civ-clone/core-city/City';
 import Dependencies from './Dependencies';
 import Player from '@civ-clone/core-player/Player';
 import Unit from '@civ-clone/core-unit/Unit';
-import { advances } from '@civ-clone/civ2-science/data/advances';
 import { attitude } from './relations';
-import { civilize } from './standing';
 import { recordContact } from '@civ-clone/base-diplomacy/lib/lastContact';
 
 // What the talks' answers do, shared by the rows' rules and the turn's rules.
 
-/** Every attitude between the two kept at `cap` or below (`diplo_sign_peace_treaty`, `diplo_agree_ceasefire`). */
-export const capAttitudes = (
+/** `holder`'s attitude toward `toward` kept at `cap` or below. */
+export const capAttitude = (
   dependencies: Dependencies,
-  player: Player,
-  other: Player,
+  holder: Player,
+  toward: Player,
   cap: number,
   reason: string
 ): void => {
-  const attitudes = attitude(dependencies);
+  const attitudes = attitude(dependencies),
+    value = attitudes.get(holder, toward);
 
-  [
-    [player, other],
-    [other, player],
-  ].forEach(([holder, toward]) => {
-    const value = attitudes.get(holder, toward);
-
-    if (value !== undefined && value > cap) {
-      attitudes.set(holder, toward, cap, reason);
-    }
-  });
+  if (value !== undefined && value > cap) {
+    attitudes.set(holder, toward, cap, reason);
+  }
 };
 
-/** `diplo_sign_peace_treaty` (`:1074`): peace, signed this turn, attitudes 50 or below. */
+// What signing any treaty does to the bits (`diplo_set_treaty_flags` with a treaty: `0x2a60` cleared both ways), and
+//  the war it ends (clearing `TREATY_WAR` clears `0x1800` too).
+const signed = (
+  dependencies: Dependencies,
+  player: Player,
+  other: Player
+): void => {
+  activeDeclarations(dependencies, War, player, other).forEach((war) =>
+    war.expire(player)
+  );
+  clearBoth(dependencies, player, other, SIGNING_CLEARS | WAR_END_CLEARS);
+};
+
+/**
+ * `diplo_civs_meet_peace` (`:5833`), two computer players making peace: the treaty and nothing else
+ *  (`diplo_set_treaty_flags(civ, civ2, 4)`).
+ */
+export const makeTreatyPeace = (
+  dependencies: Dependencies,
+  player: Player,
+  other: Player
+): void => {
+  signed(dependencies, player, other);
+  makePeace(dependencies, player, other);
+};
+
+/**
+ * `diplo_sign_peace_treaty` (`:1074`): peace signed this turn (`0x4004`), any war ended, the computer player's attitude
+ *  50 or below, its patience reset, contact now.
+ */
 export const signPeace = (
   dependencies: Dependencies,
-  player: Player,
-  other: Player
+  computer: Player,
+  person: Player
 ): void => {
-  makePeace(dependencies, player, other);
-  capAttitudes(dependencies, player, other, 50, 'peace');
-  setBoth(dependencies, player, other, CHANGED_THIS_TURN);
-  recordContact(dependencies, player, other, dependencies.turn.value());
+  makeTreatyPeace(dependencies, computer, person);
+  capAttitude(dependencies, computer, person, 50, 'peace');
+  setBoth(dependencies, computer, person, CHANGED_THIS_TURN);
+  patience(dependencies, computer, person).reset();
+  recordContact(dependencies, computer, person, dependencies.turn.value());
 };
 
-/** `diplo_agree_ceasefire` (`:1101`): a ceasefire, attitudes 50 or below, no tribute owed. */
+/**
+ * `diplo_agree_ceasefire` (`:1101`): a ceasefire signed this turn (`0x4002`), no tribute owed, the computer player's
+ *  attitude 50 or below, contact now, and nobody is the aggressor against the person any more.
+ */
 export const signCeasefire = (
   dependencies: Dependencies,
-  player: Player,
-  other: Player
+  computer: Player,
+  person: Player
 ): void => {
-  makeCeasefire(dependencies, player, other);
-  capAttitudes(dependencies, player, other, 50, 'ceasefire');
-  clearBoth(dependencies, player, other, TRIBUTE);
-  setBoth(dependencies, player, other, CHANGED_THIS_TURN);
-  recordContact(dependencies, player, other, dependencies.turn.value());
+  signed(dependencies, computer, person);
+  makeCeasefire(dependencies, computer, person);
+  setBoth(dependencies, computer, person, CHANGED_THIS_TURN);
+  clearBoth(dependencies, computer, person, TRIBUTE);
+  capAttitude(dependencies, computer, person, 50, 'ceasefire');
+  recordContact(dependencies, computer, person, dependencies.turn.value());
+  dependencies.playerRegistry
+    .entries()
+    .forEach((other: Player) =>
+      clearFlag(dependencies, other, person, AGGRESSOR)
+    );
 };
 
-/** `diplo_form_alliance` (`:1050`): an alliance, and the computer player's attitude 25 warmer. */
+/**
+ * `diplo_form_alliance` (`:1050`): an alliance (and so peace), the computer player 25 warmer, its patience reset,
+ *  contact now.
+ */
 export const formAlliance = (
   dependencies: Dependencies,
   computer: Player,
   other: Player
 ): void => {
+  signed(dependencies, computer, other);
   makeAlliance(dependencies, computer, other);
   attitude(dependencies).adjust(computer, other, -25, 'alliance');
-  setBoth(dependencies, computer, other, CHANGED_THIS_TURN);
-  clearBoth(dependencies, computer, other, CEASEFIRE_LINGERS);
+  patience(dependencies, computer, other).reset();
+  recordContact(dependencies, computer, other, dependencies.turn.value());
+};
+
+const tradeUnit = (unit: Unit): boolean => {
+  try {
+    return unit.hasTrait(TradeMissions);
+  } catch (e) {
+    return false;
+  }
 };
 
 /**
- * `diplo_expel_units` (`:4243`): each of `player`'s units nearer one of `host`'s cities than its own goes to its own
- *  nearest city (a land unit on a land mass where `host` has cities, any unit at sea; trade units stay). Units are
- *  moved, not walked, as the original's are.
+ * `diplo_expel_units` (`:4243`): each of `player`'s units nearer one of `host`'s cities than its own leaves: one at sea,
+ *  or a land unit (not a trade unit) on a land mass where `host` has cities, goes to `player`'s nearest city (a unit at
+ *  sea, its nearest city on the coast). Units are moved, not walked, as the original's are.
  */
 export const expelUnits = (
   dependencies: Dependencies,
@@ -100,24 +150,50 @@ export const expelUnits = (
     return 0;
   }
 
-  const nearest = (unit: Unit, cities: City[]): [City, number] =>
-    cities.reduce(
-      ([best, distance]: [City, number], city: City): [City, number] => {
-        const here = unit.tile().distanceFrom(city.tile());
+  const landMassOf = (() => {
+      const byTile = new Map<unknown, unknown>();
 
-        return here < distance ? [city, here] : [best, distance];
-      },
-      [cities[0], unit.tile().distanceFrom(cities[0].tile())]
-    );
+      try {
+        dependencies.landMassRegistry
+          .entries()
+          .forEach((landMass) =>
+            landMass.tiles().forEach((tile) => byTile.set(tile, landMass))
+          );
+      } catch (e) {
+        // No land masses: every land unit counts as on one of the host's.
+      }
+
+      return (tile: unknown): unknown => byTile.get(tile) ?? null;
+    })(),
+    hostLandMasses = new Set(
+      hostCities.map((city: City) => landMassOf(city.tile()))
+    ),
+    nearest = (unit: Unit, cities: City[]): [City, number] =>
+      cities.reduce(
+        ([best, distance]: [City, number], city: City): [City, number] => {
+          const here = unit.tile().distanceFrom(city.tile());
+
+          return here < distance ? [city, here] : [best, distance];
+        },
+        [cities[0], unit.tile().distanceFrom(cities[0].tile())]
+      );
 
   let moved = 0;
 
   dependencies.unitRegistry.getByPlayer(player).forEach((unit: Unit) => {
-    const atSea = unit.tile().isWater(),
-      // A unit at sea goes to the nearest of its cities on the coast.
-      homes = atSea
-        ? ownCities.filter((city: City) => city.tile().isCoast())
-        : ownCities;
+    const atSea = unit.tile().isWater();
+
+    if (
+      !atSea &&
+      (tradeUnit(unit) || !hostLandMasses.has(landMassOf(unit.tile())))
+    ) {
+      return;
+    }
+
+    // A unit at sea goes to the nearest of its cities on the coast.
+    const homes = atSea
+      ? ownCities.filter((city: City) => city.tile().isCoast())
+      : ownCities;
 
     if (homes.length === 0) {
       return;
@@ -193,63 +269,6 @@ export const declareWarFor = (
     declareWar(dependencies, player, other);
   } finally {
     instigated.delete(player);
-  }
-};
-
-/**
- * What a computer player thinks `advance` is worth (`ai_advance_value`, in part): RULES.TXT's value for it, plus its
- *  civilized modifier times the leader's civilize attitude, at least 1. The terms for the player's own cities and units
- *  are left out.
- */
-export const advanceValue = (
-  dependencies: Dependencies,
-  player: Player,
-  advance: Advance | typeof Advance
-): number => {
-  const AdvanceType =
-      advance instanceof Advance
-        ? advance.sourceClass<typeof Advance>()
-        : advance,
-    row = advances.find(([Type]) => Type === AdvanceType);
-
-  if (row === undefined) {
-    return 1;
-  }
-
-  const [, , , aiValue, civilizedModifier] = row;
-
-  return Math.max(
-    1,
-    aiValue + civilizedModifier * civilize(dependencies, player)
-  );
-};
-
-/** `from`'s advances that `by` lacks, the ones `by` values most first. */
-export const advancesWanted = (
-  dependencies: Dependencies,
-  from: Player,
-  by: Player
-): Advance[] => {
-  try {
-    const byResearch = dependencies.playerResearchRegistry.getByPlayer(by);
-
-    return dependencies.playerResearchRegistry
-      .getByPlayer(from)
-      .complete()
-      .filter((advance: Advance): boolean => {
-        const AdvanceType = advance.sourceClass<typeof Advance>();
-
-        return !AdvanceType.repeatable && !byResearch.completed(AdvanceType);
-      })
-      .map((advance: Advance, index: number): [Advance, number, number] => [
-        advance,
-        advanceValue(dependencies, by, advance),
-        index,
-      ])
-      .sort(([, a, i], [, b, j]) => b - a || j - i)
-      .map(([advance]) => advance);
-  } catch (e) {
-    return [];
   }
 };
 

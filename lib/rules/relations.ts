@@ -1,7 +1,11 @@
 import {
   AGGRESSOR,
+  AGGRESSOR_LONG,
   CEASEFIRE_LINGERS,
+  CHANGED_THIS_TURN,
+  NUCLEAR_THREAT,
   NUKED,
+  RECENT_CONTACT,
   WAR_THIS_TURN,
   clearBoth,
   hasFlag,
@@ -22,8 +26,15 @@ import {
   declareWarQuietly,
   declaringQuietly,
   endedSilently,
+  expelUnits,
+  expireSilently,
   instigatorOf,
 } from '../effects';
+import {
+  activeDeclarations,
+  makePeace,
+} from '@civ-clone/base-diplomacy/lib/declareWar';
+import War from '@civ-clone/base-diplomacy-declaration-war/War';
 import { attitude, reputation } from '../relations';
 import { reputationCost, startingAttitude } from '../formulas';
 import City from '@civ-clone/core-city/City';
@@ -60,10 +71,11 @@ const barbarian = (player: Player): boolean => {
 };
 
 /**
- * When two players make contact (`Created` for a `Contact`), each starts with an attitude to the other, as the original
- *  gives each civilization when it is made (`civ.cpp:4642-4660`): between computer players 10 to 89; between a computer
- *  player and a person 10 to 75, colder the harder the game; 100 toward the barbarians. And an embassy (`Embassy`)
- *  makes contact.
+ * When two players make contact (`Created` for a `Contact`), each starts with the attitude to the other the original
+ *  gives when it makes each civilization (`civ.cpp:4642-4660`): the one made later rolls for the pair, 10 + 0 to 79,
+ *  and when the one made earlier is a person, 5 × the level more, 10 to 75; 100 toward the barbarians. Here the order
+ *  they joined the game stands for the order they were made. First contact is a change this turn
+ *  (`TREATY_CHANGED_THIS_TURN`) and a recent contact. And an embassy (`Embassy`) makes contact.
  */
 export const createdRules = (
   prefix: string,
@@ -82,6 +94,8 @@ export const createdRules = (
         return;
       }
 
+      setBoth(dependencies, player, other, CHANGED_THIS_TURN | RECENT_CONTACT);
+
       const attitudes = attitude(dependencies);
 
       if (
@@ -91,19 +105,21 @@ export const createdRules = (
         return;
       }
 
-      const value =
-        barbarian(player) || barbarian(other)
-          ? 100
-          : startingAttitude(
-              human(dependencies, player) || human(dependencies, other),
-              level(dependencies),
-              Math.floor(random() * 80)
-            );
+      const players = dependencies.playerRegistry.entries(),
+        [earlier] = [player, other].sort(
+          (a, b) => players.indexOf(a) - players.indexOf(b)
+        ),
+        value =
+          barbarian(player) || barbarian(other)
+            ? 100
+            : startingAttitude(
+                human(dependencies, earlier),
+                level(dependencies),
+                Math.floor(random() * 80)
+              );
 
       attitudes.set(player, other, value, 'contact');
       attitudes.set(other, player, value, 'contact');
-
-      recordContact(dependencies, player, other, dependencies.turn.value());
     })
   ),
   new Created(
@@ -112,12 +128,18 @@ export const createdRules = (
       (interaction: Interaction): boolean => interaction instanceof Embassy
     ),
     new Effect((interaction: Interaction): void => {
-      const embassy = interaction as unknown as Embassy;
+      // `Created` runs inside `Interaction`'s constructor, before `Embassy`'s own sets its holder and host: the players
+      //  are already there.
+      const [holder, host] = interaction.players();
+
+      if (holder === undefined || host === undefined || holder === host) {
+        return;
+      }
 
       makeContact(
         dependencies.interactionRegistry,
-        embassy.holder(),
-        embassy.host(),
+        holder,
+        host,
         dependencies.ruleRegistry,
         dependencies.turn
       );
@@ -126,24 +148,44 @@ export const createdRules = (
 ];
 
 /**
- * A declaration of war (`DeclaredWar`, `diplo_declare_war`, `diplomacy.cpp:1196`):
+ * A declaration of war (`DeclaredWar`, `diplo_declare_war`, `diplomacy.cpp:1196-1270`). `own` is the original's
+ *  `civ2 < 0`: nobody asked it to (`declareWarFor`). A computer player's threats and wars between computer players set
+ *  the war directly in the original, so they hear none of this (`declareWarQuietly`).
  *
- * - `<prefix>:declared-war/reputation`: breaking a ceasefire or a peace costs 1 (none on Chieftain or with the Eiffel
- *   Tower), 1 more for the top power acting on its own, all of it twice when the peace still carries a ceasefire;
- *   breaking an alliance 1 (spared likewise) and 1 more on its own. A war declared at another's request isn't its own;
- *   one it was made to declare is. A computer player's threats cost nothing (`declareWarQuietly`).
- * - `<prefix>:declared-war/attitude`: made to declare war (`diplo_force_war`), each side's attitude to the other is
- *   100; at another's request, the one who asked is 5 warmer to the declarer, 15 if it broke a treaty, 25 an alliance.
- * - `<prefix>:declared-war/standing`: war this turn; a person who declares war is the aggressor and its victim holds a
- *   vendetta; any lingering ceasefire is gone.
- * - `<prefix>:declared-war/allies-join`: a person's victim's allies, computer players in contact with the person and
- *   neither allied with it nor at war with it, join the war, 100 colder (`diplo_allies_join_war`).
+ * - `<prefix>:declared-war/ally`: war on an ally is no war: the alliance is cancelled instead (both stay at peace and
+ *   go home), and the rest below still applies to it.
+ * - `<prefix>:declared-war/reputation`: a broken ceasefire or peace costs 1 (none on Chieftain or with the Eiffel
+ *   Tower) and 1 more for the top power on its own initiative, all of it twice when the peace still carries a
+ *   ceasefire; a broken alliance 1 (spared likewise) and 1 more on its own. The one who asked gives the declarer 1 credit;
+ *   a person declaring of its own accord loses 1 of its credit with its victim each time the cost is counted. Made to
+ *   declare it, it costs only with a person on either side.
+ * - `<prefix>:declared-war/attitude`: made to declare war, each side's attitude to the other is 100; at another's
+ *   request, the one who asked is 5 warmer to the declarer, 15 if it broke a ceasefire or peace, 25 an alliance.
+ * - `<prefix>:declared-war/standing`: war this turn; a person who declares war is the aggressor for long, its victim
+ *   holds a vendetta, they were in contact this turn, and its victim's allies join in.
  */
 export const declaredWarRules = (
   prefix: string,
   dependencies: Dependencies,
   engine: Engine
 ): DeclaredWar[] => [
+  new DeclaredWar(
+    `${prefix}:declared-war/ally`,
+    new Criterion(
+      (by: Player, against: Player, forced: boolean, broken: TreatyLevel) =>
+        broken === TreatyLevel.Alliance && !declaringQuietly(by)
+    ),
+    new Effect((by: Player, against: Player): void => {
+      activeDeclarations(dependencies, War, by, against).forEach((war) =>
+        expireSilently(war, by)
+      );
+      makePeace(dependencies, by, against);
+      clearBoth(dependencies, by, against, WAR_THIS_TURN);
+      expelUnits(dependencies, by, against);
+      expelUnits(dependencies, against, by);
+      engine.emit('civ2-diplomacy:alliance-cancelled', by, against);
+    })
+  ),
   new DeclaredWar(
     `${prefix}:declared-war/reputation`,
     new Effect(
@@ -157,6 +199,19 @@ export const declaredWarRules = (
           return;
         }
 
+        const reputations = reputation(dependencies),
+          instigator = instigatorOf(by),
+          own = instigator === null,
+          person = human(dependencies, by);
+
+        if (instigator !== null) {
+          reputations.setCredit(
+            instigator,
+            by,
+            reputations.credit(instigator, by) + 1
+          );
+        }
+
         const kind =
           broken === TreatyLevel.Alliance
             ? 'alliance'
@@ -165,29 +220,33 @@ export const declaredWarRules = (
             : 'none';
 
         // Made to declare war, it costs only when a person is one of them (`diplo_force_war`).
-        if (
-          forced &&
-          !human(dependencies, by) &&
-          !human(dependencies, against)
-        ) {
+        if (forced && !person && !human(dependencies, against)) {
           return;
         }
 
-        const cost = reputationCost(
-          kind,
-          kind === 'treaty' &&
+        const lingering =
+            kind === 'treaty' &&
             hasFlag(dependencies, by, against, CEASEFIRE_LINGERS),
-          instigatorOf(by) === null,
-          level(dependencies) === CHIEFTAIN,
-          ownsWonder(dependencies, by, 'eiffel-tower'),
-          rank(dependencies, by) === 7 && cities(dependencies, by) > 4
-        );
+          cost = reputationCost(
+            kind,
+            lingering,
+            own,
+            level(dependencies) === CHIEFTAIN,
+            ownsWonder(dependencies, by, 'eiffel-tower'),
+            rank(dependencies, by) === 7 && cities(dependencies, by) > 4
+          );
 
         if (cost > 0) {
-          reputation(dependencies).adjust(
+          reputations.adjust(by, cost, forced ? 'forced-war' : 'war');
+        }
+
+        if (own && person && kind !== 'none') {
+          const times = kind === 'treaty' && lingering ? 2 : 1;
+
+          reputations.setCredit(
             by,
-            cost,
-            forced ? 'forced-war' : 'war'
+            against,
+            reputations.credit(by, against) - times
           );
         }
       }
@@ -231,53 +290,71 @@ export const declaredWarRules = (
   ),
   new DeclaredWar(
     `${prefix}:declared-war/standing`,
-    new Effect((by: Player, against: Player): void => {
-      setBoth(dependencies, by, against, WAR_THIS_TURN);
-      clearBoth(dependencies, by, against, CEASEFIRE_LINGERS);
+    new Effect(
+      (
+        by: Player,
+        against: Player,
+        forced: boolean,
+        broken: TreatyLevel
+      ): void => {
+        const quiet = declaringQuietly(by);
 
-      if (!human(dependencies, by)) {
-        return;
+        clearBoth(dependencies, by, against, CEASEFIRE_LINGERS);
+
+        if (broken !== TreatyLevel.Alliance || quiet) {
+          setBoth(dependencies, by, against, WAR_THIS_TURN);
+        }
+
+        if (quiet || !human(dependencies, by)) {
+          return;
+        }
+
+        if (!hasVendetta(against, by, dependencies.interactionRegistry)) {
+          dependencies.interactionRegistry.register(
+            new Vendetta(against, by, new Never(), dependencies.ruleRegistry)
+          );
+        }
+
+        if (broken === TreatyLevel.Alliance) {
+          return;
+        }
+
+        setFlag(dependencies, by, against, AGGRESSOR | AGGRESSOR_LONG);
+        recordContact(dependencies, by, against, dependencies.turn.value());
+        engine.emit('civ2-diplomacy:war-declared', by, against);
+
+        // `diplo_allies_join_war` (`:1134`): the victim's allies, in contact with the person and neither allied nor at
+        //  war with it, join in, 100 colder, and the person is their aggressor and its victim's.
+        dependencies.playerRegistry
+          .entries()
+          .filter(
+            (ally: Player) =>
+              ally !== by &&
+              ally !== against &&
+              !human(dependencies, ally) &&
+              allied(dependencies, ally, against) &&
+              !allied(dependencies, ally, by) &&
+              !atWar(dependencies, ally, by) &&
+              inContact(dependencies, ally, by)
+          )
+          .forEach((ally: Player) => {
+            attitude(dependencies).adjust(ally, by, 100, 'ally-attacked');
+            declareWarQuietly(dependencies, ally, by);
+            setBoth(dependencies, ally, by, RECENT_CONTACT);
+            setFlag(dependencies, by, ally, AGGRESSOR | AGGRESSOR_LONG);
+            setFlag(dependencies, by, against, AGGRESSOR | AGGRESSOR_LONG);
+            recordContact(dependencies, ally, by, dependencies.turn.value());
+            engine.emit('civ2-diplomacy:ally-joins-war', ally, by, against);
+          });
       }
-
-      setFlag(dependencies, by, against, AGGRESSOR);
-      recordContact(dependencies, by, against, dependencies.turn.value());
-
-      if (!hasVendetta(against, by, dependencies.interactionRegistry)) {
-        dependencies.interactionRegistry.register(
-          new Vendetta(against, by, new Never(), dependencies.ruleRegistry)
-        );
-      }
-
-      engine.emit('civ2-diplomacy:war-declared', by, against);
-    })
-  ),
-  new DeclaredWar(
-    `${prefix}:declared-war/allies-join`,
-    new Criterion((by: Player): boolean => human(dependencies, by)),
-    new Effect((by: Player, against: Player): void =>
-      dependencies.playerRegistry
-        .entries()
-        .filter(
-          (ally: Player) =>
-            ally !== by &&
-            ally !== against &&
-            !human(dependencies, ally) &&
-            allied(dependencies, ally, against) &&
-            !allied(dependencies, ally, by) &&
-            !atWar(dependencies, ally, by) &&
-            inContact(dependencies, ally, by)
-        )
-        .forEach((ally: Player) => {
-          attitude(dependencies).adjust(ally, by, 100, 'ally-attacked');
-          declareWarQuietly(dependencies, ally, by);
-          recordContact(dependencies, ally, by, dependencies.turn.value());
-          engine.emit('civ2-diplomacy:ally-joins-war', ally, by, against);
-        })
     )
   ),
 ];
 
-/** A nuclear strike: each victim on the 3 × 3 is 100 colder to the attacker (`unit_combat.cpp:306-312`). */
+/**
+ * A nuclear strike: each victim on the 3 × 3 is 100 colder to the attacker and threatened by it, and the attacker has
+ *  nuked it (`unit_combat.cpp:306-312`). base-diplomacy's rule gives the vendetta.
+ */
 export const detonatedRules = (
   prefix: string,
   dependencies: Dependencies
@@ -304,7 +381,8 @@ export const detonatedRules = (
       victims.delete(attacker);
       victims.forEach((victim: Player) => {
         attitude(dependencies).adjust(victim, attacker, 100, 'nuclear');
-        setFlag(dependencies, victim, attacker, NUKED);
+        setFlag(dependencies, victim, attacker, NUCLEAR_THREAT);
+        setFlag(dependencies, attacker, victim, NUKED);
       });
     })
   ),

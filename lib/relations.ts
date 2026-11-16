@@ -28,17 +28,56 @@ export const ATTITUDE_MAXIMUM = 100;
 /** The lowest reputation: the best. The original keeps it in a byte with no other limit. */
 export const REPUTATION_MINIMUM = 0;
 
+// The talks under way: a computer player's attitude in talks (`diplo_eval.cur_attitude`) moves with every change to
+//  its attitude toward the person it is talking to, as `civ_adjust_attitude` moves it (`civ.cpp:2966-2975`).
+const inTalks = new Map<Player, { toward: Player; value: number }>();
+
+/**
+ * While `holder` talks with `toward`, its attitude in talks is `live.value`, and every `adjust` of its attitude toward
+ *  `toward` adds to it, unclamped, as the original's does. `endTalks` stops it.
+ */
+export const beginTalks = (
+  holder: Player,
+  toward: Player,
+  live: { value: number }
+): void => {
+  inTalks.set(holder, Object.assign(live, { toward }));
+};
+
+/** `holder`'s talks are over. */
+export const endTalks = (holder: Player): void => {
+  inTalks.delete(holder);
+};
+
+class TalksAttitude extends Attitude {
+  adjust(
+    holder: Player,
+    toward: Player,
+    delta: number,
+    reason?: string
+  ): number {
+    const live = inTalks.get(holder);
+
+    if (live !== undefined && live.toward === toward) {
+      live.value += delta;
+    }
+
+    return super.adjust(holder, toward, delta, reason);
+  }
+}
+
 /**
  * The game's attitudes: `attitude(registries).get(holder, toward)` is how `holder` feels about `toward`, 0 (warmest)
  *  to 100 (coldest), or `undefined` before they've met. A new attitude is seeded when contact is made
- *  (`civ2-diplomacy:interaction/created/seed-attitude`), so change one with `adjust` only once the pair has met.
+ *  (`civ2-diplomacy:interaction/created/seed-attitude`), so change one with `adjust` only once the pair has met. An
+ *  `adjust` during talks also moves the computer player's attitude in those talks.
  */
 export const attitude = ({
   interactionRegistry,
   ruleRegistry,
   turn,
 }: RelationRegistries): Attitude =>
-  new Attitude(interactionRegistry, ruleRegistry, turn, {
+  new TalksAttitude(interactionRegistry, ruleRegistry, turn, {
     minimum: ATTITUDE_MINIMUM,
     maximum: ATTITUDE_MAXIMUM,
   });

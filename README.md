@@ -25,7 +25,7 @@ A meeting between a computer player and a person, whoever opens it (`Negotiation
   person's Eiffel Tower, 2 at war; each proposal spends 1, tribute and an ally's help all of it, gifts give some back,
   shared maps cost 2 more; it recovers 1 every third turn.
 
-Two computer players don't talk: they meet at the start of a turn (below).
+Two computer players don't talk: they meet when their units do (`Rules/civsMeet`, `diplo_civs_meet`): advances swapped and peace, an alliance against a third, or war, with a person allied to either called to help.
 
 ## Attitude and reputation (`lib/relations`)
 
@@ -55,10 +55,11 @@ rules, for whoever brings the government down.
 
 Turn bits cleared; the Senate's roll; patience; a computer player breaking a treaty it means to (`TREATY_BREAKING_RULE`,
 silently, B37); a ceasefire ending at the computer player's next audience, after 15 turns without contact or an
-incident (`civ2-diplomacy:ceasefire-expired`, `civ2-diplomacy:audience-due`); two computer players meeting
-(`diplo_civs_meet`: advances swapped and peace, or war; contact lapsing after 16 turns; allies swapping advances); the
-border incidents (`BORDER_INTRUDERS_RULE`, the first intruded square of each city, B4); the attitude drift; ganging
-up; reputation recovering.
+incident (`civ2-diplomacy:ceasefire-expired`, `civ2-diplomacy:audience-due`); computer pairs (tribute marks, aggressor
+marks lapsing every 32 turns, contact lapsing after 16 turns without meeting, allies swapping advances every 8); the
+border incidents (`BORDER_INTRUDERS_RULE`, the first intruded square of each city, B4; a repeat at peace means a demand
+to withdraw at the next audience); the attitude drift; ganging up on the person who leads the world; reputation
+recovering.
 
 ## Treaties
 
@@ -68,7 +69,8 @@ contact.
 
 ## Saves
 
-Load these with the game's saveable classes: `Records/TreatyFlagsRecord` and `Records/SenateRecord`, with
+Load these with the game's saveable classes: `Records/TreatyFlagsRecord`, `Records/SenateRecord` and
+`Records/CallForHelpRecord`, with
 base-diplomacy's `PatienceRecord` and `LastContactRecord`, core-diplomacy's three records, and library-diplomacy's
 proposals.
 
@@ -80,19 +82,24 @@ proposals.
 
 ## Not here, or not as the original
 
-- **Border violators:** the original asks a peace partner whose units stay inside its borders to withdraw or face war
-  (`diplo_review_violators`, with a Senate scandal for a refusal), and marks units as warned. Here every incident is a
-  first offence (a peace partner's counts one less), and the turn-of-signing and recent-contact exceptions are left out.
-- **Incidents:** `INCIDENT` is read (an early audience, a ceasefire's early end) but only part 2's espionage sets it.
-- **An ally's call for help** (`diplo_ally_demand_help`: +100 for refusing, or the alliance cancelled) isn't made.
-- **Declaring war on an ally** is war here (base-diplomacy ends both treaties); the original only cancels the
-  alliance. civ2-unit refuses an attack on an ally, so a person doesn't reach it that way.
-- **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person
-  still reads it. Classic only leaves it unannounced.
-- **A gift of a unit** warms the computer player by 3 × its attack plus defence; the original counts its cost.
-- **Two computer players** meeting don't ally (`diplo_civs_meet_alliance`), and their meeting is a turn-start rule for
-  each pair every fourth turn rather than when their units meet.
-- **Wars for hire:** a rich computer player asking two advances instead of gold, and the nuclear terms of the price.
-- **An advance's worth** is RULES.TXT's value and civilized modifier only, without the original's terms for cities and
-  units.
-- **The space race, scenarios and the bloodlust option** in the computer player's evaluation.
+- **Audiences:** a computer player's audience always opens with its request (`Initiate`); the original asks for the
+  emissary only when it has something to say, so an audience with nothing on the agenda ends without one there. Until
+  the hosts open an audience on `civ2-diplomacy:audience-due`, the turn-start rule ends a lapsed ceasefire itself, so
+  that audience can't re-grant it.
+- **Patience** is kept per pair; the original keeps one count per computer player.
+- **Border incidents:** a unit's warning mark (`UNITF_BORDER_WARNED`) is kept for the session only, not saved. The
+  violators' demand to withdraw is made at the computer player's next audience (`WITHDRAWAL_DEMANDED`) rather than at
+  once.
+- **Calls for help** (`diplo_ally_demand_help`) likewise wait for the next audience (`CallForHelpRecord`).
+- **Computer players meeting** decide at most once per pair each turn, when their units meet; the original decides at
+  every meeting. Losing contact removes the pair's `Contact`, allies' too, as the original clears the bit.
+- **Wonders:** the blocking-wonder refusal of an exchange doesn't compare the players' wonders in the wonder's group.
+- **An advance's worth** (`ai_advance_value`): RULES.TXT's value and civilized modifier, the University/Computers and
+  Invention/Industrialization terms, nobody knowing it, and the advances it leads to. Left out: the shift toward
+  militaristic of a computer player at war with a person ahead of it on a shared land mass; expansion by sea; the Port
+  Facility's ships; the Aqueduct and Sewer sizes; the tribe's own preferences; the computer players' bonus terms.
+- **The space race, scenarios and the bloodlust option** in the evaluation, ganging up and the war price; the nuclear
+  threat mark the evaluation sets.
+- **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person still
+  reads it (`BROKEN` and `AGGRESSOR_LONG` are kept as the original sets them). Classic only leaves it unannounced.
+- **Espionage incidents** (part 2) are the other source of `INCIDENT`.

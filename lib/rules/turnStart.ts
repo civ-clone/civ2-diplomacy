@@ -1,5 +1,15 @@
 import {
   AGGRESSOR,
+  AGGRESSOR_LONG,
+  BROKEN,
+  CHANGED_THIS_TURN,
+  RECENT_CONTACT,
+  TRIBUTE,
+  WITHDRAWAL_DEMANDED,
+  setBoth,
+  clearBoth,
+  CEASEFIRE_LINGERS,
+  SNEAK_ATTACK,
   HOSTILE_INTENT,
   INCIDENT,
   TURN_BITS,
@@ -17,9 +27,11 @@ import {
   cities,
   civilize,
   expand,
+  gangUpLeader,
   hostile,
   human,
   inContact,
+  knows,
   level,
   rank,
   strength,
@@ -30,13 +42,7 @@ import {
   hasTreatyLevel,
 } from '@civ-clone/base-diplomacy/lib/treatyLevel';
 import { activeDeclarations } from '@civ-clone/base-diplomacy/lib/declareWar';
-import {
-  advanceValue,
-  advancesWanted,
-  declareWarQuietly,
-  expireSilently,
-  signPeace,
-} from '../effects';
+import { declareWarQuietly, expireSilently, makeTreatyPeace } from '../effects';
 import { attitude, reputation } from '../relations';
 import { breakChance, gangsUp, reputationRecovers, roll } from '../formulas';
 import {
@@ -50,6 +56,14 @@ import {
   recordContact,
 } from '@civ-clone/base-diplomacy/lib/lastContact';
 import { ownsWonder, pacifies } from '../wonders';
+import Contact from '@civ-clone/base-diplomacy-interaction-contact/Contact';
+import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
+import { callAlly } from '../callForHelp';
+import { hasEmbassy } from '@civ-clone/base-diplomacy/lib/embassy';
+import {
+  cancelAlliance,
+  makeAlliance,
+} from '@civ-clone/base-diplomacy/lib/declareWar';
 import Ceasefire from '@civ-clone/base-diplomacy-declaration-ceasefire/Ceasefire';
 import City from '@civ-clone/core-city/City';
 import Criterion from '@civ-clone/core-rule/Criterion';
@@ -70,6 +84,10 @@ import isBarbarian from '@civ-clone/base-civilization-barbarian/isBarbarian';
 import makeContact from '@civ-clone/base-diplomacy-interaction-contact/makeContact';
 import { patience } from '@civ-clone/base-diplomacy/lib/patience';
 import { rollSenate } from '../senate';
+import { NEVER, advances } from '@civ-clone/civ2-science/data/advances';
+import Advance from '@civ-clone/core-science/Advance';
+import { advanceValue } from '../survey';
+import readers from '../readers';
 
 // The start of each player's turn (OpenCiv2 `civ_turn_update_diplomacy`, `civ.cpp:7040-7245`; `game.cpp:1689-1704`).
 
@@ -95,29 +113,42 @@ const othersOf = (dependencies: Dependencies, player: Player): Player[] =>
     .filter((other: Player) => other !== player && !barbarian(other));
 
 // The border incidents counted at the start of a computer player's turn, for its attitude drift: the weight toward
-//  each person, kept for the turn (`diplo_count_border_intruders`).
+//  each person, kept for the turn (`diplo_count_border_intruders`, `diplo_review_border_incident`).
 const incidents = new WeakMap<Player, Map<Player, number>>();
 
-/** The weight of `intruder`'s units inside `computer`'s borders this turn, if `border-intruders` counted any. */
+// The units already warned once for intruding (`UNITF_BORDER_WARNED`): a second offence counts as a repeat. Kept for
+//  the session only.
+const warned = new WeakSet<Unit>();
+
+/** The drift's starting value for `computer` toward `intruder` this turn, if `border-intruders` counted an incident. */
 export const incidentWeight = (
   computer: Player,
   intruder: Player
 ): number | undefined => incidents.get(computer)?.get(intruder);
 
+export interface Intrusion {
+  // The incident's weight: each unit 1, 1 more on a road, a railroad, a mine or irrigation, 2 more in a fortress.
+  weight: number;
+  // Repeat offences: units warned before, and cities with more than 3 intruders.
+  repeat: number;
+}
+
 /**
- * `diplo_count_border_intruders` (`diplomacy.cpp:5327`): each military unit of `intruder` on a land square of one of
- *  `holder`'s cities' radius, not in a city, counts 1, 1 more on a road, a railroad, a mine or irrigation, 2 more in a
- *  fortress. Allies don't count. With `everySquare` false (the original, B4) only the first intruded square of each
- *  city is looked at.
+ * `diplo_count_border_intruders` (`diplomacy.cpp:5327`): `intruder`'s units on the land squares of `holder`'s cities'
+ *  radius, out of a city, on a square whose first unit is `intruder`'s. Each military unit counts (settlers,
+ *  diplomats and trade units don't). Allies don't count. With `everySquare` false (the original, B4) only the first
+ *  such square of each city is looked at.
  */
 export const borderIntruders = (
   dependencies: Dependencies,
   holder: Player,
   intruder: Player,
   everySquare: boolean
-): number => {
+): Intrusion => {
+  const intrusion: Intrusion = { weight: 0, repeat: 0 };
+
   if (allied(dependencies, holder, intruder)) {
-    return 0;
+    return intrusion;
   }
 
   const improvementWeight = (tile: Tile): number =>
@@ -137,8 +168,6 @@ export const borderIntruders = (
       0
     );
 
-  let count = 0;
-
   dependencies.cityRegistry.getByPlayer(holder).forEach((city: City) => {
     const squares = (() => {
       try {
@@ -147,6 +176,8 @@ export const borderIntruders = (
         return [] as Tile[];
       }
     })();
+
+    let intruders = 0;
 
     for (const tile of squares) {
       if (
@@ -157,57 +188,122 @@ export const borderIntruders = (
         continue;
       }
 
-      const units = dependencies.unitRegistry
+      const [first] = dependencies.unitRegistry.getByTile(tile);
+
+      if (first === undefined || first.player() !== intruder) {
+        continue;
+      }
+
+      dependencies.unitRegistry
         .getByTile(tile)
         .filter(
           (unit: Unit) =>
             unit.player() === intruder && unit.attack().value() > 0
-        );
+        )
+        .forEach((unit: Unit) => {
+          if (warned.has(unit)) {
+            intrusion.repeat++;
+          } else {
+            warned.add(unit);
+          }
 
-      if (units.length === 0) {
-        continue;
-      }
-
-      count += units.length * (1 + improvementWeight(tile));
+          intruders++;
+          intrusion.weight += 1 + improvementWeight(tile);
+        });
 
       if (!everySquare) {
         break;
       }
     }
+
+    if (intruders > 3) {
+      intrusion.repeat++;
+    }
   });
 
-  return count;
+  return intrusion;
 };
 
 /**
- * The border incidents `computer` counts at the start of its turn, toward each person it is neither allied with nor at
- *  war with (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
+ * The border incidents `computer` counts at the start of its turn (`diplo_review_border_incident`, `:6418-6515`),
+ *  toward each person it is in contact with, neither allied nor at war:
+ *
+ * - without peace: the incident's weight starts the drift; with repeat offences (and a vendetta counting as one) above
+ *   2 less the person's reputation, a roll of the reputation + repeats over 1 sets hostile intent both ways;
+ * - at peace: a first offence starts the drift at the weight less 1; a repeat makes it demand at its next audience
+ *   that the units leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
+ * - a treaty signed last turn, or (at peace) contact in the last 2 turns, counts no incident.
+ *
+ * `everySquare` as `borderIntruders`.
  */
 export const countIncidents = (
   dependencies: Dependencies,
   computer: Player,
-  everySquare: boolean
+  everySquare: boolean,
+  random: () => number = Math.random,
+  engine: Engine | null = null
 ): void => {
-  const counted = new Map<Player, number>();
+  const counted = new Map<Player, number>(),
+    turn = dependencies.turn.value();
 
   othersOf(dependencies, computer)
     .filter(
       (person: Player) =>
         human(dependencies, person) &&
+        inContact(dependencies, computer, person) &&
         !allied(dependencies, computer, person) &&
         !atWar(dependencies, computer, person)
     )
     .forEach((person: Player) => {
-      const weight = borderIntruders(
+      const intrusion = borderIntruders(
         dependencies,
         computer,
         person,
         everySquare
       );
 
-      if (weight > 0) {
-        counted.set(person, weight);
+      if (intrusion.weight === 0) {
+        return;
       }
+
+      const recent = hasFlag(dependencies, computer, person, CHANGED_THIS_TURN);
+
+      if (!hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)) {
+        if (recent) {
+          return;
+        }
+
+        let repeat = intrusion.repeat;
+
+        if (vendetta(dependencies, computer, person)) {
+          repeat++;
+        }
+
+        const odds = reputation(dependencies).get(person) + repeat;
+
+        if (odds > 2 && roll(random, odds) > 1) {
+          setBoth(dependencies, computer, person, HOSTILE_INTENT);
+        }
+
+        counted.set(person, intrusion.weight);
+
+        return;
+      }
+
+      const last = lastContact(dependencies, computer, person);
+
+      if (recent || (last !== undefined && last < turn && turn - last < 3)) {
+        return;
+      }
+
+      if (intrusion.repeat === 0) {
+        counted.set(person, intrusion.weight - 1);
+
+        return;
+      }
+
+      setFlag(dependencies, computer, person, WITHDRAWAL_DEMANDED | INCIDENT);
+      engine?.emit('civ2-diplomacy:audience-due', computer, person);
     });
 
   incidents.set(computer, counted);
@@ -224,7 +320,9 @@ export const attitudeDelta = (
   person: Player,
   start: number
 ): number => {
-  const players = dependencies.playerRegistry
+  const nuclear = (player: Player): number =>
+      readers(dependencies).nuclear(player),
+    players = dependencies.playerRegistry
       .entries()
       .filter((player: Player) => !barbarian(player)),
     feelings = attitudeOf(dependencies),
@@ -329,6 +427,13 @@ export const attitudeDelta = (
     delta += rankAdjust;
   }
 
+  // Nuclear weapons: the person's make it warmer, more so to one without (`:6592-6597`).
+  if (nuclear(person) > 0) {
+    const less = delta - 1;
+
+    delta = nuclear(computer) === 0 && less > 0 ? delta - 2 : less;
+  }
+
   const temper = Math.max(
     -2,
     attack(dependencies, computer) * 3 + expand(dependencies, computer) * 2
@@ -342,16 +447,23 @@ export const attitudeDelta = (
 
   delta += temper + rankDifference;
 
-  if (computerStrength * 4 < personStrength) {
-    delta--;
-  }
+  // Its own weakness, unless the computer players are ganging up on a person who earned it (`:6608-6619`).
+  if (
+    gangUpLeader(dependencies, nuclear) === null ||
+    (effectiveReputation <= warScore &&
+      !vendetta(dependencies, computer, person))
+  ) {
+    if (computerStrength * 4 < personStrength) {
+      delta--;
+    }
 
-  if (computerStrength * 2 < personStrength) {
-    delta--;
-  }
+    if (computerStrength * 2 < personStrength) {
+      delta--;
+    }
 
-  if (Math.trunc((computerStrength * 3) / 2) < personStrength) {
-    delta--;
+    if (Math.trunc((computerStrength * 3) / 2) < personStrength) {
+      delta--;
+    }
   }
 
   if (!alliance) {
@@ -426,13 +538,7 @@ export const driftAttitude = (
         return;
       }
 
-      // A peace partner's incident is a first offence, one less (`diplo_review_border_incident`, `:6470`).
-      const start =
-        weight === undefined
-          ? 0
-          : hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)
-          ? weight - 1
-          : weight;
+      const start = weight ?? 0;
 
       attitudes.adjust(
         computer,
@@ -470,6 +576,8 @@ export const breakTreaties = (
 
       if (allied(dependencies, computer, other)) {
         attitude(dependencies).adjust(computer, other, 100, 'hostile-intent');
+        // No contact since: an audience is due (`last_contact_turn = -1`, `civ.cpp:7117`).
+        recordContact(dependencies, computer, other, -1);
 
         return;
       }
@@ -477,12 +585,18 @@ export const breakTreaties = (
       const turn = dependencies.turn.value(),
         last = lastContact(dependencies, computer, other);
 
-      setFlag(dependencies, computer, other, AGGRESSOR);
+      // `0x80840`: the aggressor, for long, and its treaty broken; contact no later than 8 turns ago.
+      setFlag(
+        dependencies,
+        computer,
+        other,
+        AGGRESSOR | AGGRESSOR_LONG | BROKEN
+      );
       recordContact(
         dependencies,
         computer,
         other,
-        last === undefined || last > turn - 8 ? turn - 8 : last
+        last === undefined || last < 0 ? turn - 8 : Math.max(last, turn - 8)
       );
 
       [Ceasefire, Peace].forEach((Type) =>
@@ -625,20 +739,40 @@ export const swapAdvances = (
   other: Player,
   random: () => number
 ): boolean => {
-  const best = (from: Player, to: Player) =>
-      advancesWanted(dependencies, from, to)
-        .map((advance) => ({
-          advance,
-          value: advanceValue(dependencies, to, advance) + roll(random, 3),
-        }))
-        .sort((a, b) => b.value - a.value)[0]?.advance,
+  // The advance `to` values most of those `from` knows and it lacks, a roll of 0 to 2 added to each, in RULES.TXT's
+  //  order, the first of the best (`:5590-5620`).
+  const best = (from: Player, to: Player): typeof Advance | undefined => {
+      let chosen: typeof Advance | undefined,
+        chosenValue = -Infinity;
+
+      advances.forEach(([Type, first, second]) => {
+        if (
+          (first === NEVER && second === NEVER) ||
+          knows(dependencies, to, Type) ||
+          !knows(dependencies, from, Type)
+        ) {
+          return;
+        }
+
+        const value = advanceValue(dependencies, to, Type) + roll(random, 3);
+
+        if (chosen === undefined || chosenValue < value) {
+          chosen = Type;
+          chosenValue = value;
+        }
+      });
+
+      return chosen;
+    },
     toPlayer = best(other, player),
     toOther = best(player, other),
-    difficulty = level(dependencies);
+    difficulty = level(dependencies),
+    learn = (to: Player, Type: typeof Advance): void =>
+      dependencies.playerResearchRegistry.getByPlayer(to).addAdvance(Type);
 
   if (toPlayer !== undefined && toOther !== undefined) {
-    give(dependencies, toPlayer, other, player);
-    give(dependencies, toOther, player, other);
+    learn(player, toPlayer);
+    learn(other, toOther);
 
     return true;
   }
@@ -647,22 +781,27 @@ export const swapAdvances = (
     advanceCount(dependencies, behind) + (6 - difficulty) * 2 <
     advanceCount(dependencies, ahead);
 
+  // One way, to an ally far behind, once a round (`TREATY_TRIBUTE`).
   if (
     toPlayer !== undefined &&
     allied(dependencies, player, other) &&
-    farBehind(player, other)
+    farBehind(player, other) &&
+    !hasFlag(dependencies, player, other, TRIBUTE)
   ) {
-    give(dependencies, toPlayer, other, player);
+    setBoth(dependencies, player, other, TRIBUTE);
+    learn(player, toPlayer);
 
     return true;
   }
 
   if (
     toOther !== undefined &&
-    allied(dependencies, player, other) &&
-    farBehind(other, player)
+    allied(dependencies, other, player) &&
+    farBehind(other, player) &&
+    !hasFlag(dependencies, other, player, TRIBUTE)
   ) {
-    give(dependencies, toOther, player, other);
+    setBoth(dependencies, player, other, TRIBUTE);
+    learn(other, toOther);
 
     return true;
   }
@@ -670,21 +809,249 @@ export const swapAdvances = (
   return false;
 };
 
+// Whether a person would learn of a pact between `player` and `other` against `target` (`diplomacy.cpp:6003-6011`): an
+//  embassy with either, the United Nations or Marco Polo's, or `target` a person in contact with either.
+const personKnows = (
+  dependencies: Dependencies,
+  player: Player,
+  other: Player,
+  target: Player
+): boolean =>
+  dependencies.playerRegistry
+    .entries()
+    .some(
+      (person: Player) =>
+        human(dependencies, person) &&
+        (hasEmbassy(dependencies, person, player) ||
+          hasEmbassy(dependencies, person, other) ||
+          ownsWonder(dependencies, person, 'united-nations') ||
+          ownsWonder(dependencies, person, 'marco-polos-embassy'))
+    ) ||
+  (human(dependencies, target) &&
+    (inContact(dependencies, target, player) ||
+      inContact(dependencies, target, other)));
+
 /**
- * Two computer players meeting (`diplo_civs_meet`, `diplomacy.cpp:6114`), every fourth turn for each pair in contact
- *  (`(turn + a + b) & 3`, here by their order in the game): if either doesn't feel secure from the other, or the other
- *  owns the Great Wall or the United Nations, or is a Republic or a Democracy that didn't start it, they swap advances
- *  and make peace; otherwise, unless they're at war already, war.
+ * `diplo_ally_join_war(player, against, ally)` (`diplomacy.cpp:5650`): `player` joins `ally`'s war on `against`,
+ *  unless it is allied with or at war with it already. With `ally` not at war with `against`, a shared vendetta becomes
+ *  hostile intent for both. Against a person it holds no vendetta against, it joins only when it last met them 6 or
+ *  more turns in the future (as the original's sum reads: so in effect never) or, at rank 7, one time in 3.
  */
-export const computersMeet = (
+export const allyJoinWar = (
+  dependencies: Dependencies,
+  player: Player,
+  against: Player,
+  ally: Player,
+  random: () => number
+): boolean => {
+  if (
+    allied(dependencies, player, against) ||
+    atWar(dependencies, player, against)
+  ) {
+    return false;
+  }
+
+  if (!atWar(dependencies, ally, against)) {
+    if (
+      vendetta(dependencies, player, against) &&
+      vendetta(dependencies, ally, against)
+    ) {
+      setFlag(dependencies, player, against, HOSTILE_INTENT);
+      setFlag(dependencies, ally, against, HOSTILE_INTENT);
+    }
+
+    return false;
+  }
+
+  if (human(dependencies, against)) {
+    if (!vendetta(dependencies, player, against)) {
+      const last = lastContact(dependencies, against, player) ?? -1;
+
+      if (last - dependencies.turn.value() < 6) {
+        return false;
+      }
+
+      if (rank(dependencies, against) < 7 && roll(random, 3) !== 0) {
+        return false;
+      }
+    }
+
+    recordContact(dependencies, against, player, dependencies.turn.value());
+    recordContact(dependencies, against, ally, dependencies.turn.value());
+  }
+
+  declareWarQuietly(dependencies, player, against);
+
+  return true;
+};
+
+/**
+ * `diplo_civs_meet_alliance` (`diplomacy.cpp:5908`): two computer players at peace ally against a third, or end their
+ *  alliance when there's none worth it. The target: a person who leads the world (rank 7, 5 or more cities, after turn
+ *  200, not on Chieftain); else, when they were allied already (and neither leads a much weaker one), a player neither
+ *  has peace with; else one both are hostile to and rank no higher than. With no target, or other alliances and no
+ *  reason, the alliance ends. A new alliance brings both into the target's wars if a person would learn of it; against
+ *  a person that doesn't join, the target has an incident with each.
+ */
+export const civsMeetAlliance = (
   dependencies: Dependencies,
   player: Player,
   other: Player,
   random: () => number,
-  nuclear: (player: Player) => number,
-  republican: (player: Player) => boolean,
   engine: Engine
 ): void => {
+  const wasAllied = allied(dependencies, player, other),
+    difficulty = level(dependencies),
+    feelings = attitudeOf(dependencies),
+    playerRank = rank(dependencies, player),
+    otherRank = rank(dependencies, other);
+
+  let firstOrAllied = wasAllied,
+    leaderGap = false;
+
+  if (
+    (playerRank === 7 && otherRank > 3) ||
+    (otherRank === 7 && playerRank > 3)
+  ) {
+    firstOrAllied = false;
+    leaderGap = true;
+  }
+
+  let alliedCount = 0,
+    target: Player | null = null,
+    targetLeader = false;
+
+  for (const third of othersOf(dependencies, player).filter(
+    (p) => p !== other
+  )) {
+    if (
+      allied(dependencies, player, third) ||
+      allied(dependencies, other, third)
+    ) {
+      alliedCount++;
+
+      continue;
+    }
+
+    targetLeader =
+      human(dependencies, third) &&
+      rank(dependencies, third) === 7 &&
+      difficulty !== CHIEFTAIN &&
+      cities(dependencies, third) >= 5 &&
+      dependencies.turn.value() >= 201;
+
+    if (targetLeader) {
+      target = third;
+
+      break;
+    }
+
+    if (difficulty === CHIEFTAIN) {
+      continue;
+    }
+
+    if (firstOrAllied) {
+      if (
+        !atPeace(dependencies, player, third) &&
+        !atPeace(dependencies, other, third)
+      ) {
+        target = third;
+
+        break;
+      }
+    } else if (
+      !leaderGap &&
+      hostile(dependencies, player, third, feelings) &&
+      playerRank <= rank(dependencies, third) &&
+      hostile(dependencies, other, third, feelings) &&
+      otherRank <= rank(dependencies, third)
+    ) {
+      target = third;
+
+      break;
+    }
+  }
+
+  if (
+    target === null ||
+    ((!targetLeader || reputation(dependencies).get(target) < alliedCount) &&
+      alliedCount !== 0 &&
+      !firstOrAllied)
+  ) {
+    if (wasAllied) {
+      cancelAlliance(dependencies, player, other);
+      engine.emit('civ2-diplomacy:computers-ended-alliance', player, other);
+    }
+
+    return;
+  }
+
+  if (!wasAllied) {
+    let joined = false;
+
+    if (personKnows(dependencies, player, other, target)) {
+      joined =
+        allyJoinWar(dependencies, player, target, other, random) ||
+        allyJoinWar(dependencies, other, target, player, random);
+    }
+
+    if (human(dependencies, target) && !joined) {
+      if (!atWar(dependencies, player, target)) {
+        setBoth(dependencies, player, target, INCIDENT);
+        // The original tests `player`'s war twice here (`:6039-6044`).
+        setBoth(dependencies, other, target, INCIDENT);
+      }
+    }
+  }
+
+  makeTreatyPeace(dependencies, player, other);
+  makeAlliance(dependencies, player, other);
+
+  if (!wasAllied) {
+    engine.emit('civ2-diplomacy:computers-allied', player, other, target);
+  }
+};
+
+/**
+ * `diplo_civs_meet` for two computer players (`diplomacy.cpp:6114-6200`), when their units meet: contact (first
+ *  contact a change this turn); every fourth turn for the pair, or at first contact, if either doesn't feel secure from
+ *  the other, or the other owns the Great Wall or the United Nations, or is a Republic or a Democracy that didn't
+ *  start a war with it, they swap advances and make peace, or, at peace, see to their alliance; otherwise, at first
+ *  contact or not at war, war: a person allied with either is called to help (`diplo_ally_demand_help`), and a vendetta
+ *  becomes the aggressor's mark.
+ */
+export const civsMeet = (
+  dependencies: Dependencies,
+  player: Player,
+  other: Player,
+  { random, nuclear, republican, engine }: TurnStartRules
+): void => {
+  const first = !inContact(dependencies, player, other),
+    players = dependencies.playerRegistry.entries();
+
+  if (first) {
+    makeContact(
+      dependencies.interactionRegistry,
+      player,
+      other,
+      dependencies.ruleRegistry,
+      dependencies.turn
+    );
+  }
+
+  setBoth(dependencies, player, other, RECENT_CONTACT);
+
+  if (
+    (dependencies.turn.value() +
+      players.indexOf(player) +
+      players.indexOf(other)) %
+      4 !==
+      0 &&
+    !first
+  ) {
+    return;
+  }
+
   const settles = (one: Player, two: Player): boolean =>
     !feelsSecure(dependencies, one, two, nuclear) ||
     pacifies(dependencies, two) ||
@@ -694,17 +1061,49 @@ export const computersMeet = (
     swapAdvances(dependencies, player, other, random);
 
     if (!atPeace(dependencies, player, other)) {
-      signPeace(dependencies, player, other);
+      makeTreatyPeace(dependencies, player, other);
       engine.emit('civ2-diplomacy:computers-made-peace', player, other);
+    } else {
+      civsMeetAlliance(dependencies, player, other, random, engine);
     }
 
     return;
   }
 
-  if (!atWar(dependencies, player, other)) {
-    declareWarQuietly(dependencies, player, other);
-    engine.emit('civ2-diplomacy:computers-went-to-war', player, other);
+  if (atWar(dependencies, player, other) && !first) {
+    return;
   }
+
+  // `diplo_civs_meet_war` (`:6050`): a person allied with either, not allied with or at war with the other, is called.
+  players
+    .filter((person: Player) => human(dependencies, person))
+    .forEach((person: Player) => {
+      [
+        [player, other],
+        [other, player],
+      ].forEach(([caller, enemy]) => {
+        if (
+          allied(dependencies, caller, person) &&
+          !allied(dependencies, person, enemy) &&
+          !atWar(dependencies, person, enemy) &&
+          !feelsSecure(dependencies, caller, enemy, nuclear)
+        ) {
+          callAlly(dependencies, caller, person, enemy);
+          engine.emit('civ2-diplomacy:audience-due', caller, person);
+        }
+      });
+    });
+
+  declareWarQuietly(dependencies, player, other);
+
+  if (vendetta(dependencies, player, other)) {
+    activeDeclarations(dependencies, Vendetta, player, other)
+      .filter((held) => held.players()[0] === player)
+      .forEach((held) => held.expire(player));
+    setFlag(dependencies, player, other, AGGRESSOR);
+  }
+
+  engine.emit('civ2-diplomacy:computers-went-to-war', player, other);
 };
 
 export interface TurnStartRules {
@@ -717,18 +1116,24 @@ export interface TurnStartRules {
 /**
  * The start of each player's turn:
  *
- * - `<prefix>:player/turn-start/turn-flags`: this turn's bits are cleared.
+ * - `<prefix>:player/turn-start/turn-flags`: this turn's bits are cleared (`civ.cpp:7080`).
  * - `<prefix>:player/turn-start/senate`: the Senate's roll.
  * - `<prefix>:player/turn-start/patience`: every third turn a computer player's patience recovers by 1.
  * - `RuleIds.treatyBreaking`: a computer player breaks a treaty it means to, without a word (B37).
- * - `<prefix>:player/turn-start/ceasefire-expiry`: a ceasefire with a person ends at the computer player's next audience,
- *   which is due after 15 turns without contact or after an incident; the audience is announced
- *   (`civ2-diplomacy:audience-due`).
- * - `<prefix>:player/turn-start/computers-meet`: two computer players in contact meet (`computersMeet`); every 16 turns
- *   two at war that haven't met lose contact and their war ends; every 8 turns allies swap advances.
- * - `RuleIds.borderIntruders`: the border incidents, the first intruded square of each city (B4).
+ * - `<prefix>:player/turn-start/ceasefire-expiry`: a ceasefire with a person ends at the computer player's next
+ *   audience, due after 15 turns without contact or after an incident (`civ2-diplomacy:audience-due`). The audience
+ *   itself ends any ceasefire too (`Rules/talks`); until the hosts open audiences on that event, this rule ends it.
+ * - `<prefix>:player/turn-start/computer-pairs` (`civ.cpp:7130-7240`): toward each other computer player, the tribute
+ *   mark is cleared; every 32 turns an aggressor mark lapses unless it was for long; every 16 turns without recent
+ *   contact, unallied pairs at peace meet if the computer players are ganging up on someone, allies swap advances, and
+ *   contact lapses (and with it any war) between pairs neither of which is the aggressor; every 8 turns allies without
+ *   recent contact swap advances.
+ * - `RuleIds.borderIntruders`: the border incidents (`countIncidents`), the first intruded square of each city (B4).
  * - `RuleIds.attitudeDrift`: the attitude drift, pinned at 100 without an incident (B3).
- * - `<prefix>:player/turn-start/gang-up`: a person whose reputation is above three times its wars + 3 is ganged up on.
+ * - `<prefix>:player/turn-start/gang-up`: at the start of the turn of the person the computer players gang up on
+ *   (`gangUpLeader`), each with more than one city that isn't its ally, if the person's reputation is above three
+ *   times its wars + 3 or it holds a vendetta: without a treaty, contact and 1 colder; with one, one time in 32 per
+ *   level + 1, hostile intent.
  * - `<prefix>:player/turn-start/reputation-recovery`: a reputation recovers on schedule.
  */
 export const turnStartRules = (
@@ -801,6 +1206,7 @@ export const turnStartRules = (
 
             if (
               last !== undefined &&
+              last >= 0 &&
               turn() - last <= 15 &&
               !hasFlag(dependencies, player, person, INCIDENT)
             ) {
@@ -810,7 +1216,12 @@ export const turnStartRules = (
             activeDeclarations(dependencies, Ceasefire, player, person).forEach(
               (ceasefire) => ceasefire.expire(player)
             );
-            clearFlag(dependencies, player, person, INCIDENT);
+            clearBoth(
+              dependencies,
+              player,
+              person,
+              CEASEFIRE_LINGERS | TRIBUTE
+            );
             recordContact(dependencies, player, person, turn());
             engine.emit('civ2-diplomacy:ceasefire-expired', player, person);
             engine.emit('civ2-diplomacy:audience-due', player, person);
@@ -818,74 +1229,81 @@ export const turnStartRules = (
       )
     ),
     new TurnStart(
-      `${prefix}:player/turn-start/computers-meet`,
+      `${prefix}:player/turn-start/computer-pairs`,
       computer,
-      new Effect((player: Player): void => {
-        const players = dependencies.playerRegistry.entries(),
-          index = players.indexOf(player);
-
+      new Effect((player: Player): void =>
         othersOf(dependencies, player)
-          .filter(
-            (other: Player) =>
-              !human(dependencies, other) &&
-              players.indexOf(other) > index &&
-              inContact(dependencies, player, other)
-          )
+          .filter((other: Player) => !human(dependencies, other))
           .forEach((other: Player) => {
-            const last = lastContact(dependencies, player, other);
+            clearFlag(dependencies, player, other, TRIBUTE);
+
+            if (turn() % 32 === 0) {
+              if (!hasFlag(dependencies, player, other, AGGRESSOR_LONG)) {
+                clearFlag(dependencies, player, other, AGGRESSOR);
+              }
+
+              clearFlag(dependencies, player, other, AGGRESSOR_LONG);
+            }
+
+            const recent = hasFlag(dependencies, player, other, RECENT_CONTACT);
 
             if (turn() % 16 === 0) {
-              // No recent contact: two at war, neither the aggressor, lose touch and their war ends.
-              if (
-                (last === undefined || turn() - last >= 16) &&
-                !allied(dependencies, player, other) &&
-                atWar(dependencies, player, other) &&
-                !hasFlag(dependencies, player, other, AGGRESSOR) &&
-                !hasFlag(dependencies, other, player, AGGRESSOR)
-              ) {
-                activeDeclarations(dependencies, War, player, other).forEach(
-                  (war) => war.expire(player)
-                );
-                engine.emit('civ2-diplomacy:contact-lapsed', player, other);
+              if (recent) {
+                clearFlag(dependencies, player, other, RECENT_CONTACT);
 
                 return;
               }
 
-              if (allied(dependencies, player, other)) {
+              if (!allied(dependencies, player, other)) {
+                if (
+                  hasTreatyLevel(
+                    dependencies,
+                    player,
+                    other,
+                    TreatyLevel.Peace
+                  ) &&
+                  gangUpLeader(dependencies, nuclear) !== null
+                ) {
+                  civsMeet(dependencies, player, other, {
+                    random,
+                    nuclear,
+                    republican,
+                    engine,
+                  });
+                }
+              } else {
                 swapAdvances(dependencies, player, other, random);
               }
-            } else if (
-              turn() % 8 === 0 &&
-              allied(dependencies, player, other) &&
-              (last === undefined || turn() - last >= 8)
-            ) {
-              swapAdvances(dependencies, player, other, random);
-            }
 
-            if ((turn() + index + players.indexOf(other)) % 4 !== 0) {
+              if (
+                inContact(dependencies, player, other) &&
+                !hasFlag(dependencies, player, other, AGGRESSOR) &&
+                !hasFlag(dependencies, other, player, AGGRESSOR)
+              ) {
+                loseContact(dependencies, player, other);
+                engine.emit('civ2-diplomacy:contact-lapsed', player, other);
+              }
+
               return;
             }
 
-            computersMeet(
-              dependencies,
-              player,
-              other,
-              random,
-              nuclear,
-              republican,
-              engine
-            );
-            recordContact(dependencies, player, other, turn());
-          });
-      })
+            if (
+              turn() % 8 === 0 &&
+              allied(dependencies, player, other) &&
+              !recent
+            ) {
+              swapAdvances(dependencies, player, other, random);
+            }
+          })
+      )
     ),
     new TurnStart(
       RuleIds.borderIntruders,
-      // Before the drift, whichever rule set's either is.
+      // Before the drift, whichever rule set's either is, and before this turn's marks are cleared.
       new High(),
       computer,
       new Effect((player: Player): void =>
-        countIncidents(dependencies, player, false)
+        countIncidents(dependencies, player, false, random, engine)
       )
     ),
     new TurnStart(
@@ -897,7 +1315,10 @@ export const turnStartRules = (
     ),
     new TurnStart(
       `${prefix}:player/turn-start/gang-up`,
-      new Criterion((player: Player): boolean => human(dependencies, player)),
+      new Criterion(
+        (player: Player): boolean =>
+          gangUpLeader(dependencies, nuclear) === player
+      ),
       new Effect((player: Player): void => {
         const wars = othersOf(dependencies, player).filter((other) =>
             atWar(dependencies, player, other)
@@ -975,4 +1396,23 @@ export const turnStartRules = (
       })
     ),
   ];
+};
+
+/**
+ * Two players lose contact (`diplo_clear_treaty_flags(civ, civ2, 1)`): their `Contact` goes, and with it any war,
+ *  and the marks of one; their treaties stay.
+ */
+export const loseContact = (
+  dependencies: Dependencies,
+  player: Player,
+  other: Player
+): void => {
+  activeDeclarations(dependencies, War, player, other).forEach((war) =>
+    expireSilently(war, player)
+  );
+  clearBoth(dependencies, player, other, AGGRESSOR | SNEAK_ATTACK);
+  dependencies.interactionRegistry
+    .getByPlayers(player, other)
+    .filter((interaction) => interaction instanceof Contact)
+    .forEach((contact) => dependencies.interactionRegistry.unregister(contact));
 };

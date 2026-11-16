@@ -128,29 +128,36 @@ export interface DistrustInputs {
 /** `diplo_favor_war_distrust` (`:2276`). */
 export declare const warDistrust: (inputs: DistrustInputs) => number;
 /**
- * Whether the computer player takes the person's money to declare war on the target (`diplo_favor_menu`): distrust
- *  below 7, or the target is no ally of its, it has no vendetta, the person fights the target and isn't outranked.
+ * Whether the computer player takes the person's money to declare war on the target (`diplo_favor_menu`, `:2420`):
+ *  distrust below 7, or the target is no ally of its, it holds no vendetta, the person fights the target and ranks no
+ *  higher than it (`power_rank[person] <= power_rank[target]`).
  */
 export declare const joinsWar: (
   distrust: number,
   targetIsComputersAlly: boolean,
   vendetta: boolean,
   personAtWarWithTarget: boolean,
-  personOutrankedByTarget: boolean
+  personRank: number,
+  targetRank: number
 ) => boolean;
 export interface SellInputs {
   value: number;
   knowers: number;
   attitude: number;
-  personTopPowerAfter200: boolean;
-  level: number;
+  personTopPower: boolean;
   personGold: number;
   allied: boolean;
-  personBehind: boolean;
-  personFarBehind: boolean;
+  personAdvances: number;
+  computerAdvances: number;
 }
-/** `diplo_offer_sell_tech` (`:647`): the price of an advance. */
+/**
+ * `diplo_offer_sell_tech` (`:647-705`): the price of an advance: its value × 20, × attitude / 50 above 50, doubled for
+ *  the top power, divided among those who know it less one (at least 1), then × 10 (× 15 above 1500 gold, and a further
+ *  × 1½ above 3000); an ally pays half when behind, else ¾, and half again when 5 or more behind; at least 100.
+ */
 export declare const sellPrice: (inputs: SellInputs) => number;
+/** `diplo_gift_menu`'s gold (`:2560-2566`): a quarter, a half, three quarters and all, each a whole number of 50s. */
+export declare const giftGold: (gold: number) => number[];
 /** `diplo_senate_intervenes` (`:5410`): 0 below the Republic; the threshold the roll must reach. */
 export declare const senateThreshold: (
   sneakAttack: boolean,

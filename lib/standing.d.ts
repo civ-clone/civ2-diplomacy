@@ -88,7 +88,10 @@ export declare const vendetta: (
   holder: Player,
   against: Player
 ) => boolean;
-/** `diplo_is_hostile`: at war, or at contact only (no ceasefire, peace or alliance) with an attitude above 49. */
+/**
+ * `diplo_is_hostile` (`diplomacy.cpp:4216`): at war; or, neither allied nor at peace (a ceasefire counts as neither),
+ *  in contact with an attitude above 49.
+ */
 export declare const hostile: (
   dependencies: Dependencies,
   player: Player,
@@ -100,3 +103,13 @@ export declare const others: (
   dependencies: Dependencies,
   ...players: Player[]
 ) => Player[];
+/**
+ * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3118`, `GAME_AI_GANG_UP`): the
+ *  top-ranked player, when a person, with more than 4 cities and no nuclear weapons, after turn 200 and above
+ *  Chieftain; else `null`. The original also alerts them, above King, to a person whose spaceship has launched: not
+ *  ported (no spaceships yet).
+ */
+export declare const gangUpLeader: (
+  dependencies: Dependencies,
+  nuclear: (player: Player) => number
+) => Player | null;

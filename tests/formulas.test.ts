@@ -8,6 +8,7 @@ import {
   demandAttitude,
   demandedTribute,
   gangsUp,
+  giftGold,
   goldAttitudeValue,
   joinsWar,
   peaceFlags,
@@ -226,30 +227,54 @@ describe('formulas', (): void => {
     });
 
     expect(distrust).equal(6);
-    expect(joinsWar(6, true, false, false, false)).true;
-    expect(joinsWar(7, true, false, true, false)).false;
-    expect(joinsWar(7, false, false, true, false)).true;
+    expect(joinsWar(6, true, false, false, 4, 4)).true;
+    expect(joinsWar(7, true, false, true, 4, 4)).false;
+    // `power_rank[person] <= power_rank[target]` (`diplomacy.cpp:2420`): a person ranked no higher than the target.
+    expect(joinsWar(7, false, false, true, 4, 4)).true;
+    expect(joinsWar(7, false, false, true, 4, 5)).true;
+    expect(joinsWar(7, false, false, true, 5, 4)).false;
+    // Eternal allies: three times the price, 500 to 25,000 (`:2234-2239`).
+    expect(price({ computerAlliedWithTarget: true })).equal(
+      Math.min(Math.max(Math.trunc((Math.min(500, 7000) * 3) / 100), 1), 500) *
+        50
+    );
   });
 
-  it('prices an advance, at least 100', (): void => {
+  it('prices an advance in the original order (`diplo_offer_sell_tech`, `:647-705`), at least 100', (): void => {
     const sell = (changes: object) =>
       sellPrice({
         value: 5,
         knowers: 3,
         attitude: 50,
-        personTopPowerAfter200: false,
-        level: 3,
+        personTopPower: false,
         personGold: 0,
         allied: false,
-        personBehind: false,
-        personFarBehind: false,
+        personAdvances: 10,
+        computerAdvances: 10,
         ...changes,
       });
 
+    // 5 × 20 = 100; ÷ (3 − 1) = 50; × 10 = 500.
     expect(sell({})).equal(500);
+    // × 60 / 50 before the division: 120 / 2 = 60, × 10.
     expect(sell({ attitude: 60 })).equal(600);
+    expect(sell({ personTopPower: true })).equal(1000);
+    // Above 1500 gold, the share × 30 / 2.
     expect(sell({ personGold: 1501 })).equal(750);
+    expect(sell({ personGold: 3001 })).equal(1125);
+    // An ally behind pays half, else ¾; 5 or more behind, half again.
+    expect(sell({ allied: true, personAdvances: 9 })).equal(250);
+    expect(sell({ allied: true })).equal(375);
+    expect(sell({ allied: true, personAdvances: 5 })).equal(125);
+    expect(sell({ allied: true, personAdvances: 6 })).equal(250);
     expect(sell({ value: 1, knowers: 30 })).equal(100);
+  });
+
+  it('offers gold gifts of a quarter, a half, three quarters and all, in 50s (`:2560-2566`)', (): void => {
+    expect(giftGold(0)).eql([]);
+    expect(giftGold(149)).eql([50, 100]);
+    expect(giftGold(400)).eql([100, 200, 300, 400]);
+    expect(giftGold(250)).eql([50, 100, 150, 250]);
   });
 
   it("steps in, or not, on the turn's roll", (): void => {
