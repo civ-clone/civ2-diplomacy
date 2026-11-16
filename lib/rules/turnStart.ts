@@ -88,6 +88,7 @@ import { NEVER, advances } from '@civ-clone/civ2-science/data/advances';
 import Advance from '@civ-clone/core-science/Advance';
 import { advanceValue } from '../survey';
 import readers from '../readers';
+import { forgetWarnings, noteIntruders, warn, warned } from '../border';
 
 // The start of each player's turn (OpenCiv2 `civ_turn_update_diplomacy`, `civ.cpp:7040-7245`; `game.cpp:1689-1704`).
 
@@ -116,9 +117,38 @@ const othersOf = (dependencies: Dependencies, player: Player): Player[] =>
 //  each person, kept for the turn (`diplo_count_border_intruders`, `diplo_review_border_incident`).
 const incidents = new WeakMap<Player, Map<Player, number>>();
 
-// The units already warned once for intruding (`UNITF_BORDER_WARNED`): a second offence counts as a repeat. Kept for
-//  the session only.
-const warned = new WeakSet<Unit>();
+// The units counted as intruders (`UNITF_BORDER_INTRUDER`): one counts once, whoever's borders it is in, until its
+//  owner's next turn or until a review with no incident clears every mark (`diplomacy.cpp:6695-6702`). The mark is
+//  for the turn only, so it is kept for the session.
+const intruderMarks = new WeakMap<Unit, { turn: number; generation: number }>();
+let markGeneration = 0;
+
+const marked = (unit: Unit, turn: number): boolean => {
+  const mark = intruderMarks.get(unit);
+
+  return (
+    mark !== undefined &&
+    mark.turn === turn &&
+    mark.generation === markGeneration
+  );
+};
+
+/** Whether the unit with `id` of `player`'s is marked as intruding now. */
+export const intruding = (
+  dependencies: Dependencies,
+  player: Player
+): ((id: string) => boolean) => {
+  const turn = dependencies.turn.value(),
+    units = dependencies.unitRegistry.getByPlayer(player);
+
+  return (id: string) =>
+    units.some((unit: Unit) => unit.id() === id && marked(unit, turn));
+};
+
+// The original's unit owner's turn ends the marks: here, a new turn does, or `clearMarks`.
+const clearMarks = (): void => {
+  markGeneration++;
+};
 
 /** The drift's starting value for `computer` toward `intruder` this turn, if `border-intruders` counted an incident. */
 export const incidentWeight = (
@@ -131,13 +161,16 @@ export interface Intrusion {
   weight: number;
   // Repeat offences: units warned before, and cities with more than 3 intruders.
   repeat: number;
+  // The units counted.
+  units: Unit[];
 }
 
 /**
  * `diplo_count_border_intruders` (`diplomacy.cpp:5327`): `intruder`'s units on the land squares of `holder`'s cities'
  *  radius, out of a city, on a square whose first unit is `intruder`'s. Each military unit counts (settlers,
- *  diplomats and trade units don't). Allies don't count. With `everySquare` false (the original, B4) only the first
- *  such square of each city is looked at.
+ *  diplomats and trade units don't), once (`UNITF_BORDER_INTRUDER`); a unit warned before (`UNITF_BORDER_WARNED`,
+ *  saved: `lib/border`) is a repeat offence, as is a city with more than 3. Allies don't count. With `everySquare`
+ *  false (the original, B4) only the first such square of each city is looked at.
  */
 export const borderIntruders = (
   dependencies: Dependencies,
@@ -145,7 +178,8 @@ export const borderIntruders = (
   intruder: Player,
   everySquare: boolean
 ): Intrusion => {
-  const intrusion: Intrusion = { weight: 0, repeat: 0 };
+  const intrusion: Intrusion = { weight: 0, repeat: 0, units: [] },
+    turn = dependencies.turn.value();
 
   if (allied(dependencies, holder, intruder)) {
     return intrusion;
@@ -198,15 +232,19 @@ export const borderIntruders = (
         .getByTile(tile)
         .filter(
           (unit: Unit) =>
-            unit.player() === intruder && unit.attack().value() > 0
+            unit.player() === intruder &&
+            unit.attack().value() > 0 &&
+            !marked(unit, turn)
         )
         .forEach((unit: Unit) => {
-          if (warned.has(unit)) {
+          if (warned(dependencies, unit)) {
             intrusion.repeat++;
           } else {
-            warned.add(unit);
+            warn(dependencies, unit);
           }
 
+          intruderMarks.set(unit, { turn, generation: markGeneration });
+          intrusion.units.push(unit);
           intruders++;
           intrusion.weight += 1 + improvementWeight(tile);
         });
@@ -224,6 +262,10 @@ export const borderIntruders = (
   return intrusion;
 };
 
+// The treaties signed last turn, noted at the start of a computer player's turn before its marks are cleared
+//  (`diplo_recent_peace_table`, `civ.cpp:7077-7079`).
+const recentPeace = new WeakMap<Player, Set<Player>>();
+
 /**
  * The border incidents `computer` counts at the start of its turn (`diplo_review_border_incident`, `:6418-6515`),
  *  toward each person it is in contact with, neither allied nor at war:
@@ -231,10 +273,10 @@ export const borderIntruders = (
  * - without peace: the incident's weight starts the drift; with repeat offences (and a vendetta counting as one) above
  *   2 less the person's reputation, a roll of the reputation + repeats over 1 sets hostile intent both ways;
  * - at peace: a first offence starts the drift at the weight less 1; a repeat makes it demand at its next audience
- *   that the units leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
+ *   that the units counted leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
  * - a treaty signed last turn, or (at peace) contact in the last 2 turns, counts no incident.
  *
- * `everySquare` as `borderIntruders`.
+ * With no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
  */
 export const countIncidents = (
   dependencies: Dependencies,
@@ -244,7 +286,12 @@ export const countIncidents = (
   engine: Engine | null = null
 ): void => {
   const counted = new Map<Player, number>(),
-    turn = dependencies.turn.value();
+    turn = dependencies.turn.value(),
+    recent = (person: Player): boolean =>
+      recentPeace.get(computer)?.has(person) ??
+      hasFlag(dependencies, computer, person, CHANGED_THIS_TURN);
+
+  let incident = false;
 
   othersOf(dependencies, computer)
     .filter(
@@ -266,10 +313,10 @@ export const countIncidents = (
         return;
       }
 
-      const recent = hasFlag(dependencies, computer, person, CHANGED_THIS_TURN);
-
       if (!hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)) {
-        if (recent) {
+        if (recent(person)) {
+          incident = true;
+
           return;
         }
 
@@ -292,19 +339,30 @@ export const countIncidents = (
 
       const last = lastContact(dependencies, computer, person);
 
-      if (recent || (last !== undefined && last < turn && turn - last < 3)) {
+      if (
+        recent(person) ||
+        (last !== undefined && last < turn && turn - last < 3)
+      ) {
+        incident = true;
+
         return;
       }
 
       if (intrusion.repeat === 0) {
+        incident = true;
         counted.set(person, intrusion.weight - 1);
 
         return;
       }
 
+      noteIntruders(dependencies, computer, person, intrusion.units);
       setFlag(dependencies, computer, person, WITHDRAWAL_DEMANDED | INCIDENT);
       engine?.emit('civ2-diplomacy:audience-due', computer, person);
     });
+
+  if (!incident) {
+    clearMarks();
+  }
 
   incidents.set(computer, counted);
 };
@@ -990,9 +1048,11 @@ export const civsMeetAlliance = (
     let joined = false;
 
     if (personKnows(dependencies, player, other, target)) {
-      joined =
-        allyJoinWar(dependencies, player, target, other, random) ||
-        allyJoinWar(dependencies, other, target, player, random);
+      // Both join, as the original's `|` has them (`:6031-6033`).
+      const first = allyJoinWar(dependencies, player, target, other, random),
+        second = allyJoinWar(dependencies, other, target, player, random);
+
+      joined = first || second;
     }
 
     if (human(dependencies, target) && !joined) {
@@ -1096,10 +1156,11 @@ export const civsMeet = (
 
   declareWarQuietly(dependencies, player, other);
 
+  // A vendetta is cleared both ways and becomes the aggressor's mark (`:6100-6104`).
   if (vendetta(dependencies, player, other)) {
-    activeDeclarations(dependencies, Vendetta, player, other)
-      .filter((held) => held.players()[0] === player)
-      .forEach((held) => held.expire(player));
+    activeDeclarations(dependencies, Vendetta, player, other).forEach((held) =>
+      held.expire(player)
+    );
     setFlag(dependencies, player, other, AGGRESSOR);
   }
 
@@ -1150,18 +1211,28 @@ export const turnStartRules = (
   return [
     new TurnStart(
       `${prefix}:player/turn-start/turn-flags`,
-      new Effect((player: Player): void =>
-        dependencies.interactionRegistry
+      new Effect((player: Player): void => {
+        const records = dependencies.interactionRegistry
           .getByPlayer(player)
           .filter(
             (interaction): interaction is TreatyFlagsRecord =>
               interaction instanceof TreatyFlagsRecord &&
               interaction.holder() === player
+          );
+
+        recentPeace.set(
+          player,
+          new Set(
+            records
+              .filter((record) => (record.value() & CHANGED_THIS_TURN) !== 0)
+              .map((record) => record.toward())
           )
-          .forEach((record: TreatyFlagsRecord) =>
-            clearFlag(dependencies, player, record.toward(), TURN_BITS)
-          )
-      )
+        );
+        records.forEach((record: TreatyFlagsRecord) =>
+          clearFlag(dependencies, player, record.toward(), TURN_BITS)
+        );
+        forgetWarnings(dependencies, player, intruding(dependencies, player));
+      })
     ),
     new TurnStart(
       `${prefix}:player/turn-start/senate`,
@@ -1270,6 +1341,8 @@ export const turnStartRules = (
                     republican,
                     engine,
                   });
+                  // The lapse clears the recent mark after (`civ.cpp:7186`).
+                  clearFlag(dependencies, player, other, RECENT_CONTACT);
                 }
               } else {
                 swapAdvances(dependencies, player, other, random);
@@ -1299,8 +1372,6 @@ export const turnStartRules = (
     ),
     new TurnStart(
       RuleIds.borderIntruders,
-      // Before the drift, whichever rule set's either is, and before this turn's marks are cleared.
-      new High(),
       computer,
       new Effect((player: Player): void =>
         countIncidents(dependencies, player, false, random, engine)

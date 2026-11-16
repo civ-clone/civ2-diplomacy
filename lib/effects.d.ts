@@ -1,5 +1,6 @@
 import Dependencies from './Dependencies';
 import Player from '@civ-clone/core-player/Player';
+import Unit from '@civ-clone/core-unit/Unit';
 /** `holder`'s attitude toward `toward` kept at `cap` or below. */
 export declare const capAttitude: (
   dependencies: Dependencies,
@@ -86,3 +87,18 @@ export declare const expireSilently: (
   },
   by: Player
 ) => void;
+/** `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). */
+export declare const sendHome: (
+  dependencies: Dependencies,
+  unit: Unit
+) => boolean;
+/**
+ * A computer player withdraws its units from a person's land (`diplo_answer_demand`, `:1907-1935`): each of its land
+ *  units on land, not a diplomat or trade unit, within 2 squares of one of the person's cities goes to its own nearest
+ *  city. Answers how many moved.
+ */
+export declare const withdrawUnits: (
+  dependencies: Dependencies,
+  computer: Player,
+  person: Player
+) => number;

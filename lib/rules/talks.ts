@@ -7,6 +7,7 @@ import {
   agendaItemOf,
   askedFor,
   begin,
+  reputationWar,
   helpBonus,
   wasForced,
   meetingOf,
@@ -50,6 +51,8 @@ import {
   expelUnits,
   formAlliance,
   makeTreatyPeace,
+  sendHome,
+  withdrawUnits,
   signCeasefire,
   signPeace,
 } from '../effects';
@@ -105,7 +108,7 @@ import { pacifies } from '../wonders';
 import { Writing } from '@civ-clone/civ2-science/Advances';
 import { activeDeclarations } from '@civ-clone/base-diplomacy/lib/declareWar';
 import { answered } from '../callForHelp';
-import { advanceValue } from '../survey';
+import { advanceValue, survey } from '../survey';
 import { give } from '@civ-clone/base-diplomacy/lib/knowledge';
 import { hasEmbassy } from '@civ-clone/base-diplomacy/lib/embassy';
 import makeContact from '@civ-clone/base-diplomacy-interaction-contact/makeContact';
@@ -116,6 +119,7 @@ import { recordContact } from '@civ-clone/base-diplomacy/lib/lastContact';
 import { senateScandal } from '../senate';
 import { shareMaps } from '@civ-clone/base-diplomacy/lib/shareMaps';
 import { unitTerms } from '../units';
+import { takeIntruders } from '../border';
 
 declare global {
   interface ChoiceMetaDataMap {
@@ -365,6 +369,9 @@ export const interactionRules = (
               meeting.sides.person
             );
 
+          // The answer reads the count as it was before this charge (`diplo_request_count`, raised after it).
+          meeting.patienceBefore = kept.spent();
+
           // Tribute and an ally's help set it to the limit, and the menu's loop adds 1 (`:1874-1878`).
           if (
             interaction instanceof DemandTribute ||
@@ -464,6 +471,16 @@ export const resolvedRules = (
           meeting.sides.computer,
           meeting.sides.person
         );
+      }
+    },
+    refuseHelp = (meeting: Meeting) => {
+      const { computer, person } = meeting.sides;
+
+      meeting.helpRefusal = meeting.live.value < 51 ? 'colder' : 'cancel';
+
+      if (meeting.helpRefusal === 'colder') {
+        attitude(dependencies).adjust(computer, person, 100, 'help-refused');
+        answered(dependencies, computer, person);
       }
     },
     // The person picks one of the computer player's advances (`civ_steal_advance`).
@@ -619,7 +636,8 @@ export const resolvedRules = (
           } else if (
             meeting.fear === 0 ||
             meeting.evaluation.reputation > 2 ||
-            meeting.live.value > 25
+            // The refusal's 10 counts already (`:3299-3304`): the `Declined` rule adds it after.
+            meeting.live.value + 10 > 25
           ) {
             return;
           }
@@ -704,7 +722,7 @@ export const resolvedRules = (
             'civ2-diplomacy:units-withdrawn',
             computer,
             person,
-            expelUnits(dependencies, computer, person)
+            withdrawUnits(dependencies, computer, person)
           );
         }
 
@@ -794,6 +812,11 @@ export const resolvedRules = (
 
           if (given instanceof Gold || given instanceof Advance) {
             give(dependencies, given, person, computer);
+
+            // A gift of gold or an advance gives back the patience it cost and more, and counts (`:2547`, `:2580`);
+            //  a unit's doesn't (`:2600-2700`).
+            spend(meeting, -(meeting.gifts + 2));
+            meeting.gifts++;
           } else {
             const unit = given as unknown as Unit,
               terms = unitTerms(dependencies, computer, unit),
@@ -820,10 +843,6 @@ export const resolvedRules = (
                 .addAdvance(terms.breakthrough);
             }
           }
-
-          // A gift gives back the patience it cost and more (`:2547`, `:2580`).
-          spend(meeting, -(meeting.gifts + 2));
-          meeting.gifts++;
         }
       }
     ),
@@ -857,8 +876,11 @@ export const resolvedRules = (
           }
 
           case AGENDA.violators: {
+            // The units it counted go to their own nearest cities (`diplo_review_violators`, `:6378-6390`).
             if (yes) {
-              expelUnits(dependencies, person, computer);
+              takeIntruders(dependencies, computer, person).forEach((unit) =>
+                sendHome(dependencies, unit)
+              );
               clearFlag(dependencies, computer, person, WITHDRAWAL_DEMANDED);
             }
 
@@ -953,19 +975,29 @@ export const resolvedRules = (
                 computer
               );
 
-              const second = !(
-                meeting.evaluation.unitsNearCities && meeting.aggressive
-              );
+              // Over a barrel (`:3060-3080`): with its units near the person's cities and aggressive, it demands a
+              //  second advance before it counts itself paid; with none left to demand, or this the second, it is.
+              const demanded = proposal
+                  .negotiation()
+                  .interactions()
+                  .filter(
+                    (action: IAction) =>
+                      action instanceof Accept &&
+                      item(action.proposal()) === AGENDA.tech
+                  ).length,
+                another =
+                  meeting.evaluation.unitsNearCities &&
+                  meeting.aggressive &&
+                  demanded < 2 &&
+                  survey(dependencies, computer, person).best !== null;
 
-              if (second || meeting.paid) {
+              if (!another) {
                 paid(meeting);
                 renew(meeting);
 
                 if (patience(dependencies, computer, person).spent() > 0) {
                   spend(meeting, -1);
                 }
-              } else {
-                meeting.paid = false;
               }
 
               return;
@@ -984,7 +1016,8 @@ export const resolvedRules = (
         }
       }
     ),
-    // A call for help's payment, accepted: the gold, and the war.
+    // A call for help's payment, accepted: the gold, and the war. Refused, the call ends by the attitude before the
+    //  refusal: below 51, 100 colder; else the alliance is cancelled (`:1336-1341`).
     resolved(
       'help-bonus',
       (resolution, proposal, meeting) =>
@@ -998,41 +1031,27 @@ export const resolvedRules = (
         if (resolution instanceof Accept) {
           give(dependencies, proposal.gift() as Gold, computer, person);
           declareWarFor(dependencies, person, call.against(), computer);
-        } else if (meeting.live.value < 51) {
-          attitude(dependencies).adjust(computer, person, 100, 'help-refused');
+          answered(dependencies, computer, person);
+
+          return;
         }
 
-        answered(dependencies, computer, person);
+        refuseHelp(meeting);
       }
     ),
-    // A call for help refused with nothing more to offer, its attitude below 51: 100 colder.
+    // A call for help refused with no payment to offer.
     resolved(
       'help-refused',
       (resolution, proposal, meeting) =>
         resolution instanceof Decline &&
         proposal instanceof JoinWar &&
         item(proposal) === AGENDA.callForHelp &&
-        meeting.live.value < 51,
-      (resolution, proposal, meeting) => {
-        // The payment, if it offers one, is the next step; without one, the refusal costs this.
-        if (
-          helpBonus(
-            dependencies,
-            meeting.sides.computer,
-            (proposal as JoinWar).against()
-          ) > 0
-        ) {
-          return;
-        }
-
-        attitude(dependencies).adjust(
+        helpBonus(
+          dependencies,
           meeting.sides.computer,
-          meeting.sides.person,
-          100,
-          'help-refused'
-        );
-        answered(dependencies, meeting.sides.computer, meeting.sides.person);
-      }
+          (proposal as JoinWar).against()
+        ) === 0,
+      (resolution, proposal, meeting) => refuseHelp(meeting)
     ),
   ];
 };
@@ -1404,7 +1423,7 @@ export const terminatedRules = (
       clearBoth(dependencies, computer, person, INCIDENT);
 
       if (
-        meeting.declareWar &&
+        (meeting.declareWar || reputationWar(dependencies, meeting)) &&
         !allied(dependencies, computer, person) &&
         !atWar(dependencies, computer, person)
       ) {
@@ -1413,13 +1432,27 @@ export const terminatedRules = (
         clearFlag(dependencies, computer, person, HOSTILE_INTENT);
       }
 
+      // An answer that ended the meeting skipped the menu's own charge in the original (`return` before the loop's
+      //  `++`), which this package makes as the proposal is made: the closing charge is that one.
+      const answerEnded = negotiation
+          .interactions()
+          .some(
+            (action) =>
+              action instanceof Resolution &&
+              action.by() === computer &&
+              action.proposal().by() === person &&
+              (outcomeOf(action).end === true || !!outcomeOf(action).says)
+          ),
+        // A city held: hostile only while aggressive (`:3912-3922`).
+        hostile = meeting.hostile && meeting.aggressive;
+
       if (received) {
-        if (!left) {
+        if (!left && !answerEnded) {
           kept.spend(1);
         }
 
-        if (meeting.conceded || meeting.hostile) {
-          const target = talks.limitOf(meeting) + (meeting.hostile ? 1 : 0);
+        if (meeting.conceded || hostile) {
+          const target = talks.limitOf(meeting) + (hostile ? 1 : 0);
 
           if (kept.spent() < target) {
             kept.spend(target - kept.spent());

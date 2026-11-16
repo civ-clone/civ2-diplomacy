@@ -66,6 +66,8 @@ export interface Meeting {
   conceded: boolean;
   ended: boolean;
   gifts: number;
+  patienceBefore: number;
+  helpRefusal: 'colder' | 'cancel' | null;
 }
 /** The meeting's state, made when it opens (`begin`), or `null` for a meeting that isn't between a computer and a person. */
 export declare const meetingOf: (negotiation: Negotiation) => Meeting | null;
@@ -79,6 +81,15 @@ export declare const begin: (
   dependencies: Dependencies,
   negotiation: Negotiation
 ) => Meeting | null;
+/**
+ * `diplo_meet_reputation_war` (`diplomacy.cpp:3579`): a person whose reputation, less the computer player's credit, is
+ *  above 6 and against whom it holds a vendetta, when it has allies, or the person leads the world, or is the weaker,
+ *  is one it means war with (`ai_declare_war`): no Senate forces a treaty then, and it keeps its hostile intent.
+ */
+export declare const reputationWar: (
+  dependencies: Dependencies,
+  meeting: Meeting
+) => boolean;
 /** The agenda item a step of the computer player's was (`AGENDA`), or `undefined`. */
 export declare const agendaItemOf: (action: object) => number | undefined;
 /** The proposal a computer player's ask belongs to, or `null`. */
@@ -135,7 +146,8 @@ export declare const talks: ({ dependencies, random }: TalksRules) => {
   exchange: (
     meeting: Meeting,
     mode: 0 | 1 | 2 | 3,
-    second?: boolean
+    second?: boolean,
+    spentBefore?: number
   ) =>
     | {
         kind: 'none';

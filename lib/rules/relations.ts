@@ -60,6 +60,7 @@ import { hasVendetta } from '@civ-clone/library-diplomacy/lib/holds';
 import isBarbarian from '@civ-clone/base-civilization-barbarian/isBarbarian';
 import makeContact from '@civ-clone/base-diplomacy-interaction-contact/makeContact';
 import { ownsWonder } from '../wonders';
+import alliesJoinWar from '../alliances';
 import { recordContact } from '@civ-clone/base-diplomacy/lib/lastContact';
 
 const barbarian = (player: Player): boolean => {
@@ -323,29 +324,9 @@ export const declaredWarRules = (
         recordContact(dependencies, by, against, dependencies.turn.value());
         engine.emit('civ2-diplomacy:war-declared', by, against);
 
-        // `diplo_allies_join_war` (`:1134`): the victim's allies, in contact with the person and neither allied nor at
-        //  war with it, join in, 100 colder, and the person is their aggressor and its victim's.
-        dependencies.playerRegistry
-          .entries()
-          .filter(
-            (ally: Player) =>
-              ally !== by &&
-              ally !== against &&
-              !human(dependencies, ally) &&
-              allied(dependencies, ally, against) &&
-              !allied(dependencies, ally, by) &&
-              !atWar(dependencies, ally, by) &&
-              inContact(dependencies, ally, by)
-          )
-          .forEach((ally: Player) => {
-            attitude(dependencies).adjust(ally, by, 100, 'ally-attacked');
-            declareWarQuietly(dependencies, ally, by);
-            setBoth(dependencies, ally, by, RECENT_CONTACT);
-            setFlag(dependencies, by, ally, AGGRESSOR | AGGRESSOR_LONG);
-            setFlag(dependencies, by, against, AGGRESSOR | AGGRESSOR_LONG);
-            recordContact(dependencies, ally, by, dependencies.turn.value());
-            engine.emit('civ2-diplomacy:ally-joins-war', ally, by, against);
-          });
+        alliesJoinWar(dependencies, against, by).forEach((ally: Player) =>
+          engine.emit('civ2-diplomacy:ally-joins-war', ally, by, against)
+        );
       }
     )
   ),

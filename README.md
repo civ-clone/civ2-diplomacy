@@ -31,7 +31,7 @@ Two computer players don't talk: they meet when their units do (`Rules/civsMeet`
 
 `attitude(registries)` (0 the warmest to 100 the coldest, per direction) and `reputation(registries)` (0 the best),
 with `attitudeBands`/`attitudeLevel`, `effectiveReputation`, `madeToDeclareWar` and `clearVendettasAgainst`, are the
-one way other civ2-* packages read and change them.
+one way other civ2-\* packages read and change them.
 
 - **Attitude** starts when contact is made (10 to 89 between computer players; 10 + 5 × level + 0 to 79, at most 75,
   toward a person), changes with what is said and done in talks (`Accepted` and `Declined`, by proposal class), war
@@ -69,8 +69,8 @@ contact.
 
 ## Saves
 
-Load these with the game's saveable classes: `Records/TreatyFlagsRecord`, `Records/SenateRecord` and
-`Records/CallForHelpRecord`, with
+Load these with the game's saveable classes: `Records/TreatyFlagsRecord`, `Records/SenateRecord`,
+`Records/CallForHelpRecord`, `Records/BorderRecord` and `Records/WarnedUnitsRecord`, with
 base-diplomacy's `PatienceRecord` and `LastContactRecord`, core-diplomacy's three records, and library-diplomacy's
 proposals.
 
@@ -87,13 +87,19 @@ proposals.
   the hosts open an audience on `civ2-diplomacy:audience-due`, the turn-start rule ends a lapsed ceasefire itself, so
   that audience can't re-grant it.
 - **Patience** is kept per pair; the original keeps one count per computer player.
-- **Border incidents:** a unit's warning mark (`UNITF_BORDER_WARNED`) is kept for the session only, not saved. The
-  violators' demand to withdraw is made at the computer player's next audience (`WITHDRAWAL_DEMANDED`) rather than at
-  once.
+- **Border incidents:** a unit's warning mark (`UNITF_BORDER_WARNED`) is saved by the unit's id, and forgotten one turn
+  in four by `(turn ^ unit) & 3`, with a number made from the id for the original's unit slot. The counted mark
+  (`UNITF_BORDER_INTRUDER`) lasts the turn and isn't saved. The violators' demand to withdraw is made at the computer
+  player's next audience (`WITHDRAWAL_DEMANDED`) rather than at once; the units it counted are saved for it.
 - **Calls for help** (`diplo_ally_demand_help`) likewise wait for the next audience (`CallForHelpRecord`).
-- **Computer players meeting** decide at most once per pair each turn, when their units meet; the original decides at
-  every meeting. Losing contact removes the pair's `Contact`, allies' too, as the original clears the bit.
-- **Wonders:** the blocking-wonder refusal of an exchange doesn't compare the players' wonders in the wonder's group.
+- **Computer players meeting** decide at most once per pair each turn, when their land units meet on land; the original
+  decides at every meeting. Which pairs met this turn is kept for the session, not saved, so a reload can decide once
+  more that turn. Losing contact removes the pair's `Contact`, allies' too, as the original clears the bit.
+- **Wonders:** the blocking-wonder refusal of an exchange reads the wonder the computer player is building, but doesn't
+  compare the players' wonders in the wonder's group of seven.
+- **A computer player's sneak attack on a person** brings the person's computer allies in (`diplo_allies_join_war`)
+  only where the war is made: `lib/alliances`'s `alliesJoinWar(registries, victim, attacker)` is for civ2-unit's forced
+  war to call after the first attack.
 - **An advance's worth** (`ai_advance_value`): RULES.TXT's value and civilized modifier, the University/Computers and
   Invention/Industrialization terms, nobody knowing it, and the advances it leads to. Left out: the shift toward
   militaristic of a computer player at war with a person ahead of it on a shared land mass; expansion by sea; the Port

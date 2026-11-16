@@ -51,6 +51,10 @@ import Player from '@civ-clone/core-player/Player';
 import SenateRecord from '../Records/SenateRecord';
 import TurnStart from '@civ-clone/core-player/Rules/TurnStart';
 import { expect } from 'chai';
+import Never from '@civ-clone/core-diplomacy/Expiries/Never';
+import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
+import alliesJoinWar from '../lib/alliances';
+import { RuleIds } from '../lib/rules/turnStart';
 import {
   lastContact,
   recordContact,
@@ -331,6 +335,7 @@ describe('border incidents', (): void => {
         tiles: () => ({ entries: () => [home, ...squares] }),
       },
       soldier = (tile: unknown) => ({
+        id: () => `soldier-${squares.indexOf(tile as any)}`,
         player: () => person,
         attack: () => ({ value: () => 1 }),
         tile: () => tile,
@@ -361,19 +366,18 @@ describe('border incidents', (): void => {
 });
 
 describe('alliances', (): void => {
-  it("sends each side's units nearer the other's cities home: a ship only to a city on the coast", async (): Promise<void> => {
+  it("sends each side's units nearer the other's cities home: a ship only to a city on its body of water (`diplo_expel_units`, `:4262-4285`)", async (): Promise<void> => {
     const { expelUnits } = await import('../lib/effects'),
       setUp = position([{ human: true }, {}]),
       [person, computer] = setUp.players,
       tile = (name: string, water = false, coast = false) =>
-        ({ name, isWater: () => water, isCoast: () => coast } as any),
-      [near, far, sea, inland, coastal] = [
-        tile('near'),
-        tile('far'),
-        tile('sea', true),
-        tile('inland'),
-        tile('coastal', false, true),
-      ],
+        ({
+          name,
+          isWater: () => water,
+          isCoast: () => coast,
+          distanceFrom: (to: any) => distances[`${name}-${to.name}`],
+          getNeighbours: () => (name === 'coastal' ? [sea] : []),
+        } as any),
       distances: { [key: string]: number } = {
         'near-host': 1,
         'near-inland': 5,
@@ -385,15 +389,19 @@ describe('alliances', (): void => {
         'sea-inland': 4,
         'sea-coastal': 7,
       },
+      [near, far, sea, inland, coastal] = [
+        tile('near'),
+        tile('far'),
+        tile('sea', true),
+        tile('inland'),
+        tile('coastal', false, true),
+      ],
       at = (start: any) => {
         let current = start;
 
         return {
           player: () => person,
-          tile: () => ({
-            ...current,
-            distanceFrom: (to: any) => distances[`${current.name}-${to.name}`],
-          }),
+          tile: () => current,
           setTile: (to: any) => (current = to),
           setStatus: () => {},
           applyVisibility: () => {},
@@ -549,16 +557,21 @@ describe('the original, rule by rule', (): void => {
     ).equal(-1);
   });
 
-  it('marks the person the aggressor toward its victim and its allies when they join (`0x80800`, `:1185-1187`)', (): void => {
+  it('marks the joining allies and the victim as waging war on the person (`0x80800`, `:1185-1187`)', (): void => {
     const setUp = metAll([{ human: true }, {}, {}]),
       [person, victim, ally] = setUp.players;
 
     makeAlliance(setUp.dependencies, victim, ally);
     declareWar(setUp.dependencies, person, victim);
 
+    // `civs[ally].treaties[attacker] |= 0x80800`, and the victim's too (`:1185-1187`): they wage the war.
     expect(
-      hasFlag(setUp.dependencies, person, ally, AGGRESSOR | AGGRESSOR_LONG)
-    ).true;
+      flagsOf(setUp.dependencies, ally, person) & (AGGRESSOR | AGGRESSOR_LONG)
+    ).equal(AGGRESSOR | AGGRESSOR_LONG);
+    expect(flagsOf(setUp.dependencies, victim, person) & AGGRESSOR_LONG).equal(
+      AGGRESSOR_LONG
+    );
+    // And the person declared it (`:1240`).
     expect(flagsOf(setUp.dependencies, person, victim) & AGGRESSOR_LONG).equal(
       AGGRESSOR_LONG
     );
@@ -623,7 +636,11 @@ describe('the original, rule by rule', (): void => {
       [person, computer] = setUp.players,
       square = { isWater: () => false },
       home = { isWater: () => false },
-      soldier = { player: () => person, attack: () => ({ value: () => 1 }) },
+      soldier = {
+        id: () => 'soldier',
+        player: () => person,
+        attack: () => ({ value: () => 1 }),
+      },
       dependencies = {
         ...setUp.dependencies,
         cityRegistry: {
@@ -658,7 +675,8 @@ describe('the original, rule by rule', (): void => {
       [person, computer] = setUp.players,
       square = { isWater: () => false },
       home = { isWater: () => false },
-      soldiers = [1, 2, 3, 4].map(() => ({
+      soldiers = [1, 2, 3, 4].map((index) => ({
+        id: () => `soldier-${index}`,
         player: () => person,
         attack: () => ({ value: () => 1 }),
       })),
@@ -745,5 +763,73 @@ describe('computer players meeting', (): void => {
 
     expect(inContact(setUp.dependencies, one, two)).false;
     expect(atWar(setUp.dependencies, one, two)).false;
+  });
+
+  it('clear a vendetta both ways when one holding it goes to war (`diplo_clear_treaty_flags(civ, civ2, 0x10)`, `:6102-6105`)', (): void => {
+    const setUp = position([
+        { units: [{ on: 0, attack: 9, defence: 9 }] },
+        { units: [{ on: 0, attack: 1, defence: 1 }] },
+      ]),
+      [one, two] = setUp.players,
+      held = [
+        new Vendetta(one, two, new Never(), setUp.ruleRegistry),
+        new Vendetta(two, one, new Never(), setUp.ruleRegistry),
+      ];
+
+    setUp.interactionRegistry.register(...held);
+
+    civsMeet(setUp.dependencies, one, two, {
+      random: () => 0,
+      nuclear: () => 0,
+      republican: () => false,
+      engine: { emit: () => {} } as any,
+    });
+
+    expect(atWar(setUp.dependencies, one, two)).true;
+    expect(held.map((vendetta) => vendetta.active())).eql([false, false]);
+    expect(hasFlag(setUp.dependencies, one, two, AGGRESSOR)).true;
+  });
+});
+
+describe('allies joining a war', (): void => {
+  it("bring a person's computer allies into a computer player's war on it, without a word and with no colder attitude (`diplo_allies_join_war`, `:1134-1194`)", (): void => {
+    const setUp = metAll([{ human: true }, {}, {}, {}]),
+      [person, attacker, ally, bystander] = setUp.players;
+
+    makeAlliance(setUp.dependencies, person, ally);
+    attitude(setUp.dependencies).set(ally, attacker, 30);
+    declareWarQuietly(setUp.dependencies, attacker, person);
+
+    expect(alliesJoinWar(setUp.dependencies, person, attacker)).eql([ally]);
+    expect(atWar(setUp.dependencies, ally, attacker)).true;
+    expect(attitude(setUp.dependencies).get(ally, attacker)).equal(30);
+    expect(hasFlag(setUp.dependencies, ally, attacker, RECENT_CONTACT)).true;
+    expect(hasFlag(setUp.dependencies, attacker, ally, RECENT_CONTACT)).true;
+    expect(
+      flagsOf(setUp.dependencies, ally, attacker) & (AGGRESSOR | AGGRESSOR_LONG)
+    ).equal(AGGRESSOR | AGGRESSOR_LONG);
+    // The victim wages it only against a person.
+    expect(
+      flagsOf(setUp.dependencies, person, attacker) & AGGRESSOR_LONG
+    ).equal(0);
+
+    // A computer player's allies don't join against a computer player.
+    makeAlliance(setUp.dependencies, attacker, bystander);
+    expect(alliesJoinWar(setUp.dependencies, ally, attacker)).eql([]);
+  });
+});
+
+describe('turn start order', (): void => {
+  it('breaks treaties before counting border incidents, and drifts attitudes after (`civ.cpp:7123`, then `diplo_ai_review_relations` at `:7223`)', (): void => {
+    const setUp = position([{}, {}]),
+      ids = setUp.ruleRegistry
+        .get(TurnStart)
+        .map((rule) => rule.id())
+        .filter((id): id is string => id !== null),
+      at = (id: string) => ids.indexOf(id);
+
+    expect(at(RuleIds.treatyBreaking)).greaterThan(-1);
+    expect(at(RuleIds.treatyBreaking)).lessThan(at(RuleIds.borderIntruders));
+    expect(at(RuleIds.borderIntruders)).lessThan(at(RuleIds.attitudeDrift));
   });
 });

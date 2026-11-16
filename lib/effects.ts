@@ -23,6 +23,7 @@ import { patience } from '@civ-clone/base-diplomacy/lib/patience';
 import City from '@civ-clone/core-city/City';
 import Dependencies from './Dependencies';
 import Player from '@civ-clone/core-player/Player';
+import Tile from '@civ-clone/core-world/Tile';
 import Unit from '@civ-clone/core-unit/Unit';
 import { attitude } from './relations';
 import { recordContact } from '@civ-clone/base-diplomacy/lib/lastContact';
@@ -125,6 +126,26 @@ export const formAlliance = (
   recordContact(dependencies, computer, other, dependencies.turn.value());
 };
 
+// The water squares joined to `tile`'s.
+const waterBody = (start: Tile): Set<Tile> => {
+  const body = new Set<Tile>([start]),
+    queue = [start];
+
+  while (queue.length > 0) {
+    queue
+      .shift()!
+      .getNeighbours()
+      .forEach((tile: Tile) => {
+        if (tile.isWater() && !body.has(tile)) {
+          body.add(tile);
+          queue.push(tile);
+        }
+      });
+  }
+
+  return body;
+};
+
 const tradeUnit = (unit: Unit): boolean => {
   try {
     return unit.hasTrait(TradeMissions);
@@ -190,10 +211,17 @@ export const expelUnits = (
       return;
     }
 
-    // A unit at sea goes to the nearest of its cities on the coast.
-    const homes = atSea
-      ? ownCities.filter((city: City) => city.tile().isCoast())
-      : ownCities;
+    // A unit at sea goes to the nearest of its cities on the same body of water (`city_adjacent_to_body`).
+    const body = atSea ? waterBody(unit.tile()) : null,
+      homes =
+        body === null
+          ? ownCities
+          : ownCities.filter((city: City) =>
+              city
+                .tile()
+                .getNeighbours()
+                .some((tile: Tile) => body.has(tile))
+            );
 
     if (homes.length === 0) {
       return;
@@ -286,4 +314,50 @@ export const expireSilently = (
 ): void => {
   silenced.add(declaration);
   declaration.expire(by);
+};
+
+/** `unit` goes to its player's nearest city, if it has one: moved, its orders dropped (`unit_relocate`). */
+export const sendHome = (dependencies: Dependencies, unit: Unit): boolean => {
+  const [home] = dependencies.cityRegistry
+    .getByPlayer(unit.player())
+    .map((city: City): [City, number] => [
+      city,
+      unit.tile().distanceFrom(city.tile()),
+    ])
+    .sort(([, a], [, b]) => a - b)
+    .map(([city]) => city);
+
+  if (home === undefined || home.tile() === unit.tile()) {
+    return false;
+  }
+
+  unit.setTile(home.tile());
+  unit.setStatus(null);
+  unit.applyVisibility();
+
+  return true;
+};
+
+/**
+ * A computer player withdraws its units from a person's land (`diplo_answer_demand`, `:1907-1935`): each of its land
+ *  units on land, not a diplomat or trade unit, within 2 squares of one of the person's cities goes to its own nearest
+ *  city. Answers how many moved.
+ */
+export const withdrawUnits = (
+  dependencies: Dependencies,
+  computer: Player,
+  person: Player
+): number => {
+  const cities = dependencies.cityRegistry.getByPlayer(person);
+
+  return dependencies.unitRegistry
+    .getByPlayer(computer)
+    .filter(
+      (unit: Unit) =>
+        !unit.tile().isWater() &&
+        unit.attack().value() + unit.defence().value() > 0 &&
+        !tradeUnit(unit) &&
+        cities.some((city: City) => unit.tile().distanceFrom(city.tile()) < 3)
+    )
+    .filter((unit: Unit) => sendHome(dependencies, unit)).length;
 };

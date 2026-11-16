@@ -727,4 +727,67 @@ describe('talks', (): void => {
     expect(attitude(setUp.dependencies).get(setUp.ai, setUp.human)).equal(100);
     expect(callForHelp(setUp.dependencies, setUp.ai, setUp.human)).equal(null);
   });
+
+  it('answers by the patience spent before the proposal, as the original raises its count after (`diplo_request_count`, `:1874-1878`)', async (): Promise<void> => {
+    const setUp = meet({}, {}, 'contact', 45);
+
+    // 1 spent: the offer's charge makes it 2, but no sweetener is asked unless more than 1 was spent before it
+    //  (`:1752`).
+    patience(setUp.dependencies, setUp.ai, setUp.human).spend(1);
+
+    expect(await propose(opened(setUp), setUp.human, 'OfferPeace')).eql([
+      'Accept',
+    ]);
+  });
+
+  it('charges an exchange of advances exactly 1 patience (`diplo_favor_menu`, `:2385-2391`)', async (): Promise<void> => {
+    const setUp = meet(
+      { advances: [Bronze] },
+      { advances: [Wheel] },
+      'peace',
+      40
+    );
+
+    expect(await propose(opened(setUp), setUp.human, 'ExchangeKnowledge')).eql([
+      'Accept',
+    ]);
+    expect(patience(setUp.dependencies, setUp.ai, setUp.human).spent()).equal(
+      1
+    );
+  });
+
+  it('charges a refused sharing of maps nothing more than the asking (`diplo_favor_share_maps`)', async (): Promise<void> => {
+    const both = { advances: [MapMaking] },
+      setUp = meet(both, both, 'alliance', 51);
+
+    expect(await propose(opened(setUp), setUp.human, 'ShareMaps')).eql([
+      'Decline',
+    ]);
+    expect(patience(setUp.dependencies, setUp.ai, setUp.human).spent()).equal(
+      1
+    );
+  });
+
+  it('cancels the alliance when a call for help is refused at attitude 51 or more, read before the refusal (`:1336-1341`)', async (): Promise<void> => {
+    const setUp = meet({}, {}, 'alliance', 60, { third: {} }),
+      enemy = setUp.players[2],
+      negotiation = new Negotiation(setUp.ai, setUp.human, setUp.ruleRegistry);
+
+    callAlly(setUp.dependencies, setUp.ai, setUp.human, enemy);
+
+    await take(negotiation);
+    await take(negotiation, named('Accept'));
+    expect(kinds(negotiation)).eql(['JoinWar']);
+    await take(negotiation);
+    await take(negotiation, named('Decline'));
+
+    for (let index = 0; index < 6 && !negotiation.terminated(); index++) {
+      await take(negotiation);
+    }
+
+    expect(treatyLevel(setUp.dependencies, setUp.ai, setUp.human)).equal(
+      TreatyLevel.Peace
+    );
+    expect(callForHelp(setUp.dependencies, setUp.ai, setUp.human)).equal(null);
+  });
 });

@@ -43,8 +43,10 @@ import {
   hasTreatyLevel,
 } from '@civ-clone/base-diplomacy/lib/treatyLevel';
 import {
+  AllianceInputs,
   allianceWilling,
   asksSweetener,
+  demandAttitude,
   demandedTribute,
   giftGold,
   joinsWar,
@@ -95,7 +97,9 @@ import Resolution from '@civ-clone/core-diplomacy/Proposal/Resolution';
 import SellAdvance from '@civ-clone/library-diplomacy/Proposals/SellAdvance';
 import ShareMaps from '@civ-clone/library-diplomacy/Proposals/ShareMaps';
 import Terminate from '@civ-clone/core-diplomacy/Negotiation/Terminate';
+import City from '@civ-clone/core-city/City';
 import Unit from '@civ-clone/core-unit/Unit';
+import Wonder from '@civ-clone/core-wonder/Wonder';
 import callForHelp from './callForHelp';
 import {
   gold,
@@ -224,6 +228,11 @@ export interface Meeting {
   ended: boolean;
   // Gifts accepted this meeting (`gifts_this_meeting`).
   gifts: number;
+  // The computer player's patience as the person's latest proposal was made, before its own charge: what the
+  //  original's answers read (`diplo_request_count`, raised only after the answer).
+  patienceBefore: number;
+  // How a refused call for help ends, decided by its attitude before the refusal (`:1336-1341`).
+  helpRefusal: 'colder' | 'cancel' | null;
 }
 
 const meetings = new WeakMap<Negotiation, Meeting>();
@@ -288,6 +297,8 @@ export const begin = (
       conceded: false,
       ended: false,
       gifts: 0,
+      patienceBefore: patience(dependencies, computer, person).spent(),
+      helpRefusal: null,
     };
 
   // The Great Wall's or the United Nations' owner has no incident to answer (`:451`).
@@ -299,6 +310,35 @@ export const begin = (
   beginTalks(computer, person, meeting.live);
 
   return meeting;
+};
+
+/**
+ * `diplo_meet_reputation_war` (`diplomacy.cpp:3579`): a person whose reputation, less the computer player's credit, is
+ *  above 6 and against whom it holds a vendetta, when it has allies, or the person leads the world, or is the weaker,
+ *  is one it means war with (`ai_declare_war`): no Senate forces a treaty then, and it keeps its hostile intent.
+ */
+export const reputationWar = (
+  dependencies: Dependencies,
+  meeting: Meeting
+): boolean => {
+  const { computer, person } = meeting.sides,
+    reputations = reputation(dependencies);
+
+  if (reputations.get(person) - reputations.credit(computer, person) <= 6) {
+    return false;
+  }
+
+  return (
+    vendetta(dependencies, computer, person) &&
+    (dependencies.playerRegistry
+      .entries()
+      .some(
+        (other: Player) =>
+          other !== computer && allied(dependencies, computer, other)
+      ) ||
+      meeting.evaluation.targetIsLeader ||
+      strength(dependencies, person) < strength(dependencies, computer))
+  );
 };
 
 // Each computer step's place in the agenda, and each ask's proposal.
@@ -493,7 +533,8 @@ export const talks = ({ dependencies, random }: TalksRules) => {
   const exchange = (
     meeting: Meeting,
     mode: 0 | 1 | 2 | 3,
-    second: boolean = false
+    second: boolean = false,
+    spentBefore: number = patienceOf(meeting.sides).spent()
   ): ExchangeAnswer => {
     const { computer, person } = meeting.sides,
       found = survey(dependencies, computer, person),
@@ -578,7 +619,7 @@ export const talks = ({ dependencies, random }: TalksRules) => {
         civilize(dependencies, computer) -
         Math.min(Math.max(Math.trunc(found.computerCount / 12), 0), 5) <
         found.computerCount &&
-      (patienceOf(meeting.sides).spent() < 2 || mode === 3)
+      (spentBefore < 2 || mode === 3)
     ) {
       return { kind: 'gift', advance: found.wanted };
     }
@@ -623,41 +664,53 @@ export const talks = ({ dependencies, random }: TalksRules) => {
       advances[0x22][0],
     ].includes(advance.sourceClass());
 
-  // Whether the person is building a wonder that needs one of the computer player's advances it lacks: the original
-  //  also compares their wonders in the wonder's group, which isn't ported.
+  // `blocking_wonder` (`diplo_exchange_survey`, `:745-760`): the computer player is building a wonder, not yet built
+  //  anywhere, that one of its advances the person lacks leads to; above King it won't trade then, lest the person
+  //  build it first. The original also requires the computer player to have fewer wonders than the person in the
+  //  wonder's group of seven, which needs civ2-wonder's order of the wonders: not ported.
   const blocksWonder = (meeting: Meeting): boolean => {
     const { computer, person } = meeting.sides,
       cityBuilds = dependencies.cityBuildRegistry,
-      requirements = dependencies.requirementRegistry;
+      requirements = dependencies.requirementRegistry,
+      wonders = dependencies.wonderRegistry;
 
     if (cityBuilds === undefined || requirements === undefined) {
       return false;
     }
 
-    return dependencies.cityRegistry.getByPlayer(person).some((city) => {
-      try {
-        const item = cityBuilds.getByCity(city).building()?.item();
+    return dependencies.cityRegistry
+      .getByPlayer(computer)
+      .some((city: City) => {
+        try {
+          const item = cityBuilds.getByCity(city).building()?.item() as
+            | (new (...args: any[]) => object)
+            | undefined;
 
-        if (item === undefined || item === null) {
+          if (
+            item === undefined ||
+            item === null ||
+            !(item.prototype instanceof Wonder) ||
+            (wonders !== undefined &&
+              wonders.entries().some((built) => built instanceof item))
+          ) {
+            return false;
+          }
+
+          return requirements
+            .for(item as any, 'requires')
+            .some((entry) =>
+              entry.targets.some(
+                (target: any) =>
+                  typeof target === 'function' &&
+                  target.prototype instanceof Advance &&
+                  knows(dependencies, computer, target) &&
+                  !knows(dependencies, person, target)
+              )
+            );
+        } catch (e) {
           return false;
         }
-
-        return requirements
-          .for(item as any, 'requires')
-          .some((entry) =>
-            entry.targets.some(
-              (target: any) =>
-                typeof target === 'function' &&
-                target.prototype instanceof Advance &&
-                knows(dependencies, computer, target) &&
-                !knows(dependencies, person, target) &&
-                Object.getPrototypeOf(item).name !== 'Unit'
-            )
-          );
-      } catch (e) {
-        return false;
-      }
-    });
+      });
   };
 
   // The computer player's agenda from item `from`: its next step, `null` when it has nothing more to say, or a
@@ -784,18 +837,19 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           }
         }
 
-        if (alliance) {
-          const half = Math.trunc(gold(dependencies, person) / 2);
-
-          tribute = Math.min(tribute, half < 101 ? 100 : half);
-        }
-
+        // Only what the person has is demanded; then an ally asks at most half of it (`:2966-2985`).
         if (
           tribute > 0 &&
           tribute !== 999 &&
           (evaluation.requestMode === 2 || propose(meeting)) &&
           tribute <= gold(dependencies, person)
         ) {
+          if (alliance) {
+            const half = Math.trunc(gold(dependencies, person) / 2);
+
+            tribute = Math.min(tribute, half < 101 ? 100 : half);
+          }
+
           return tag(
             new DemandTribute(
               new Gold(tribute),
@@ -819,6 +873,12 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           // Over a barrel: its units near the person's cities and aggressive, it demands the second advance too.
           again =
             demandedOne &&
+            actions(negotiation).filter(
+              (action) =>
+                action instanceof DemandTribute &&
+                action.by() === computer &&
+                agendaItems.get(action) === AGENDA.tech
+            ).length === 1 &&
             actions(negotiation).some(
               (action) =>
                 action instanceof Accept &&
@@ -914,11 +974,8 @@ export const talks = ({ dependencies, random }: TalksRules) => {
   const threatens = (meeting: Meeting): boolean => {
     const { computer, person } = meeting.sides;
 
-    if (meeting.hostile && meeting.aggressive) {
-      return false;
-    }
-
-    if (meeting.aggressive) {
+    // A city held and aggressive: it stays hostile, and is no longer aggressive (`:3912-3922`).
+    if (meeting.aggressive && !meeting.hostile) {
       return true;
     }
 
@@ -1293,7 +1350,8 @@ export const talks = ({ dependencies, random }: TalksRules) => {
   ): Answer => {
     const { computer, person } = meeting.sides,
       evaluation = meeting.evaluation,
-      spent = patienceOf(meeting.sides).spent(),
+      // What the original reads: the count before this proposal's own charge.
+      spent = meeting.patienceBefore,
       difficulty = level(dependencies),
       computerRank = rank(dependencies, computer),
       personRank = rank(dependencies, person),
@@ -1326,8 +1384,23 @@ export const talks = ({ dependencies, random }: TalksRules) => {
               ),
               { attitude: 2 * advanceValue(dependencies, computer, found.best) }
             ),
+      // Whether an earlier ask for this proposal was accepted (`paid`).
+      paidSoFar = (): boolean =>
+        actions(negotiation).some(
+          (action) =>
+            action instanceof Accept &&
+            asks.get(action.proposal())?.proposal === proposal
+        ),
+      // Whether an earlier ask for this proposal was refused.
+      refusedSoFar = (): boolean =>
+        actions(negotiation).some(
+          (action) =>
+            action instanceof Decline &&
+            asks.get(action.proposal())?.proposal === proposal
+        ),
+      // Gold, unless a secret advance was given already (`!paid`, `:1563`, `:1773`).
       cash = (amount: number) => (): IProposal | null =>
-        amount > 0
+        amount > 0 && !paidSoFar()
           ? new DemandTribute(
               new Gold(amount),
               computer,
@@ -1335,8 +1408,9 @@ export const talks = ({ dependencies, random }: TalksRules) => {
               ruleRegistry
             )
           : null,
+      // The call to fight its target, made even when the person is at war with it already (`:1595`, `:1795`).
       solidarity = (against: Player | null) => (): IProposal | null =>
-        against !== null && !atWar(dependencies, person, against)
+        against !== null
           ? new JoinWar(against, computer, negotiation, ruleRegistry)
           : null;
 
@@ -1383,7 +1457,7 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           return chosen;
         },
         enemy = targetFightingAndStrong ? null : commonEnemy(),
-        willing = allianceWilling({
+        willingInputs: AllianceInputs = {
           level: difficulty,
           personAllies: anyAllies(person),
           hasWarTarget: target !== null,
@@ -1402,10 +1476,20 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           vendetta: vendetta(dependencies, computer, person),
           targetIsPersonsAlly,
           patienceSpent: spent,
-        });
+        };
+
+      let willing = allianceWilling(willingInputs);
 
       if (enemy !== null && (willing.reasons & 4) !== 0) {
         allianceTarget = enemy;
+
+        // The target it settled on is the person's ally: agreed, reason 1 (`:1478-1482`).
+        if (allied(dependencies, person, enemy) && !targetIsPersonsAlly) {
+          willing = allianceWilling({
+            ...willingInputs,
+            targetIsPersonsAlly: true,
+          });
+        }
       }
 
       if (!willing.agree) {
@@ -1530,7 +1614,10 @@ export const talks = ({ dependencies, random }: TalksRules) => {
             return (flags & 8) !== 0 ? null : {};
           }
 
-          if ((flags & 6) !== 0 || personRank === 7 || effective > 3) {
+          // The flags as they stand after any refused sweetener (`:1806`).
+          const standing = refusedSoFar() ? flags & 8 : flags;
+
+          if ((standing & 6) !== 0 || personRank === 7 || effective > 3) {
             const paid = actions(negotiation).some(
               (action) =>
                 action instanceof Accept &&
@@ -1562,16 +1649,10 @@ export const talks = ({ dependencies, random }: TalksRules) => {
 
     if (proposal instanceof ExchangeKnowledge) {
       const second = outcomeOf(proposal).attitude === 1,
-        offer = exchange(meeting, 0, second);
+        offer = exchange(meeting, 0, second, spent);
 
       if (offer.kind === 'offer') {
-        return plain(true, {
-          takes: offer.takes,
-          attitude: offer.value,
-          // An exchange made leaves room in the favour menu: one more patience, if there is room (`:2385-2391`).
-          patience:
-            patienceOf(meeting.sides).spent() + 1 < limitOf(meeting) ? 1 : 0,
-        });
+        return plain(true, { takes: offer.takes, attitude: offer.value });
       }
 
       if (offer.kind === 'gift') {
@@ -1715,7 +1796,9 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           personKnowsMapMaking: knows(dependencies, person, MapMaking),
           computerKnowsMapMaking: knows(dependencies, computer, MapMaking),
         }),
-        { patience: 2 }
+        // Shared, two more of its patience (`diplo_favor_share_maps`); refused, none.
+        { patience: 2 },
+        { patience: 0 }
       );
     }
 
@@ -1834,17 +1917,27 @@ export const talks = ({ dependencies, random }: TalksRules) => {
       return plain(true, { withdraws: true, patience: patienceSpent });
     }
 
-    const base: Outcome = { withdraws, patience: patienceSpent };
+    const base: Outcome = { withdraws, patience: patienceSpent },
+      // Its attitude once the demand's own cost is counted, as the original adjusts it before answering (`:1967-1981`).
+      after =
+        meeting.live.value +
+        demandAttitude(
+          kind,
+          computerRank,
+          personRank,
+          found.computerCount,
+          found.personCount
+        );
 
     if ((tribute === 0 && (wanted === null || fear === 0)) || kind === 5) {
       if (!alliance) {
         const polite =
-          (!evaluation.initialAggressive && meeting.live.value < 76) ||
+          (!evaluation.initialAggressive && after < 76) ||
           withdraws ||
           ((fear !== 0 ||
             paid ||
             hasFlag(dependencies, computer, person, CHANGED_THIS_TURN) ||
-            meeting.live.value < 26) &&
+            after < 26) &&
             (!oneIn(proposal, 'war', random, 3) || kind === 5));
 
         return plain(false, polite ? base : { ...base, ...war });
@@ -1853,11 +1946,33 @@ export const talks = ({ dependencies, random }: TalksRules) => {
       // An ally asked: an advance (`diplo_tech_exchange` mode 2 or 3), or sympathy, or a taunt.
       const help = exchange(
         meeting,
-        patienceOf(meeting.sides).spent() < 2 ? 3 : 2
+        meeting.patienceBefore < 2 ? 3 : 2,
+        false,
+        meeting.patienceBefore
       );
 
       if (help.kind === 'gift') {
         return plain(true, { ...base, gives: [help.advance] });
+      }
+
+      // It offers to sell instead, and that is its answer (`diplo_offer_sell_tech` returning 1, `:1046`).
+      if (help.kind === 'sell') {
+        return {
+          asks: [
+            () =>
+              new SellAdvance(
+                help.advance,
+                new Gold(help.price),
+                computer,
+                negotiation,
+                ruleRegistry
+              ),
+          ],
+          off: () => base,
+          accept: false,
+          onAccept: {},
+          onDecline: base,
+        };
       }
 
       const sympathy =
@@ -1869,7 +1984,7 @@ export const talks = ({ dependencies, random }: TalksRules) => {
         !sympathy &&
         !(
           !evaluation.initialAggressive &&
-          meeting.live.value < 51 &&
+          after < 51 &&
           !evaluation.targetIsLeader
         )
       ) {
@@ -2052,7 +2167,11 @@ export const talks = ({ dependencies, random }: TalksRules) => {
 
     if (action instanceof Decline && action.proposal() instanceof Initiate) {
       // Turned away, its Senate may force a treaty (`diplo_meet_senate_forces_treaty`).
-      if (action.by() === person && !meeting.declareWar) {
+      if (
+        action.by() === person &&
+        !meeting.declareWar &&
+        !reputationWar(dependencies, meeting)
+      ) {
         const war = atWar(dependencies, computer, person),
           afraid =
             !atPeace(dependencies, computer, person) && meeting.fear !== 0,
@@ -2066,9 +2185,12 @@ export const talks = ({ dependencies, random }: TalksRules) => {
           (pacifies(dependencies, computer) ||
             senateBlocks(dependencies, person, computer, 'ignore-audience'))
         ) {
+          // Afraid without peace, peace (which ends the war: `:3610-3625`); else a ceasefire.
           return say(
             computer,
-            war ? DIALOGUE.senateForcedCeasefire : DIALOGUE.senateForcedPeace,
+            afraid
+              ? DIALOGUE.senateForcedPeace
+              : DIALOGUE.senateForcedCeasefire,
             negotiation
           );
         }
@@ -2179,7 +2301,7 @@ export const talks = ({ dependencies, random }: TalksRules) => {
         }
       }
 
-      if (meeting.live.value >= 51) {
+      if (meeting.helpRefusal === 'cancel') {
         return tag(
           say(computer, DIALOGUE.helpRefused, negotiation),
           AGENDA.callForHelp
@@ -2192,7 +2314,7 @@ export const talks = ({ dependencies, random }: TalksRules) => {
       action.by() === person &&
       action.proposal() instanceof Gift &&
       agendaItems.get(action.proposal()) === AGENDA.callForHelp &&
-      meeting.live.value >= 51
+      meeting.helpRefusal === 'cancel'
     ) {
       return tag(
         say(computer, DIALOGUE.helpRefused, negotiation),

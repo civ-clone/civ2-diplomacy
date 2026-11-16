@@ -2,12 +2,18 @@ import Dependencies from '../Dependencies';
 import Engine from '@civ-clone/core-engine/Engine';
 import Player from '@civ-clone/core-player/Player';
 import TurnStart from '@civ-clone/core-player/Rules/TurnStart';
+import Unit from '@civ-clone/core-unit/Unit';
 /** The rule ids that civ2-enhanced supersedes. */
 export declare const RuleIds: {
   attitudeDrift: string;
   borderIntruders: string;
   treatyBreaking: string;
 };
+/** Whether the unit with `id` of `player`'s is marked as intruding now. */
+export declare const intruding: (
+  dependencies: Dependencies,
+  player: Player
+) => (id: string) => boolean;
 /** The drift's starting value for `computer` toward `intruder` this turn, if `border-intruders` counted an incident. */
 export declare const incidentWeight: (
   computer: Player,
@@ -16,12 +22,14 @@ export declare const incidentWeight: (
 export interface Intrusion {
   weight: number;
   repeat: number;
+  units: Unit[];
 }
 /**
  * `diplo_count_border_intruders` (`diplomacy.cpp:5327`): `intruder`'s units on the land squares of `holder`'s cities'
  *  radius, out of a city, on a square whose first unit is `intruder`'s. Each military unit counts (settlers,
- *  diplomats and trade units don't). Allies don't count. With `everySquare` false (the original, B4) only the first
- *  such square of each city is looked at.
+ *  diplomats and trade units don't), once (`UNITF_BORDER_INTRUDER`); a unit warned before (`UNITF_BORDER_WARNED`,
+ *  saved: `lib/border`) is a repeat offence, as is a city with more than 3. Allies don't count. With `everySquare`
+ *  false (the original, B4) only the first such square of each city is looked at.
  */
 export declare const borderIntruders: (
   dependencies: Dependencies,
@@ -36,10 +44,10 @@ export declare const borderIntruders: (
  * - without peace: the incident's weight starts the drift; with repeat offences (and a vendetta counting as one) above
  *   2 less the person's reputation, a roll of the reputation + repeats over 1 sets hostile intent both ways;
  * - at peace: a first offence starts the drift at the weight less 1; a repeat makes it demand at its next audience
- *   that the units leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
+ *   that the units counted leave, or war (`WITHDRAWAL_DEMANDED`, an incident, `civ2-diplomacy:audience-due`);
  * - a treaty signed last turn, or (at peace) contact in the last 2 turns, counts no incident.
  *
- * `everySquare` as `borderIntruders`.
+ * With no incident, every unit's intruder mark is cleared. `everySquare` as `borderIntruders`.
  */
 export declare const countIncidents: (
   dependencies: Dependencies,

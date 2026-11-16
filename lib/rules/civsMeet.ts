@@ -1,5 +1,6 @@
 import { TurnStartRules, civsMeet } from './turnStart';
 import Criterion from '@civ-clone/core-rule/Criterion';
+import High from '@civ-clone/core-rule/Priorities/High';
 import Dependencies from '../Dependencies';
 import Effect from '@civ-clone/core-rule/Effect';
 import Moved from '@civ-clone/core-unit/Rules/Moved';
@@ -19,7 +20,9 @@ const barbarian = (player: Player): boolean => {
 
 /**
  * Two computer players meet when one's unit ends a move next to the other's (`diplo_civs_meet`, called as units meet):
- *  `civsMeet`. Once for each pair each turn: the original may decide again on each meeting, but with no more to go on.
+ *  `civsMeet`, before base-diplomacy's contact rule makes contact. Once for each pair each turn, kept for the session
+ *  (a game reloaded mid-turn may meet a pair once more): the original may decide again at each meeting, with no more to
+ *  go on.
  */
 export const movedRules = (
   prefix: string,
@@ -33,7 +36,13 @@ export const movedRules = (
   return [
     new Moved(
       `${prefix}:unit/moved/computers-meet`,
-      new Criterion((unit: Unit): boolean => computer(unit.player())),
+      // Before base-diplomacy's contact rule, so first contact gets its decision here.
+      new High(),
+      // Land units, on land (`ai.cpp`'s land moves call `diplo_civs_meet`).
+      new Criterion(
+        (unit: Unit): boolean =>
+          computer(unit.player()) && !unit.tile().isWater()
+      ),
       new Effect((unit: Unit): void => {
         const player = unit.player(),
           turn = dependencies.turn.value(),
@@ -48,7 +57,7 @@ export const movedRules = (
               .forEach((neighbour: Unit) => {
                 const other = neighbour.player();
 
-                if (other !== player && computer(other)) {
+                if (other !== player && computer(other) && !tile.isWater()) {
                   others.add(other);
                 }
               })
