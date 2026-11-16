@@ -56,6 +56,7 @@ import Criterion from '@civ-clone/core-rule/Criterion';
 import Dependencies from '../Dependencies';
 import Effect from '@civ-clone/core-rule/Effect';
 import Engine from '@civ-clone/core-engine/Engine';
+import High from '@civ-clone/core-rule/Priorities/High';
 import Peace from '@civ-clone/base-diplomacy-declaration-peace/Peace';
 import Player from '@civ-clone/core-player/Player';
 import Tile from '@civ-clone/core-world/Tile';
@@ -176,6 +177,40 @@ export const borderIntruders = (
   });
 
   return count;
+};
+
+/**
+ * The border incidents `computer` counts at the start of its turn, toward each person it has no treaty or war with
+ *  (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
+ */
+export const countIncidents = (
+  dependencies: Dependencies,
+  computer: Player,
+  everySquare: boolean
+): void => {
+  const counted = new Map<Player, number>();
+
+  othersOf(dependencies, computer)
+    .filter(
+      (person: Player) =>
+        human(dependencies, person) &&
+        !hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace) &&
+        !atWar(dependencies, computer, person)
+    )
+    .forEach((person: Player) => {
+      const weight = borderIntruders(
+        dependencies,
+        computer,
+        person,
+        everySquare
+      );
+
+      if (weight > 0) {
+        counted.set(person, weight);
+      }
+    });
+
+  incidents.set(computer, counted);
 };
 
 /**
@@ -838,32 +873,12 @@ export const turnStartRules = (
     ),
     new TurnStart(
       RuleIds.borderIntruders,
+      // Before the drift, whichever rule set's either is.
+      new High(),
       computer,
-      new Effect((player: Player): void => {
-        const counted = new Map<Player, number>();
-
-        othersOf(dependencies, player)
-          .filter(
-            (person: Player) =>
-              human(dependencies, person) &&
-              !hasTreatyLevel(
-                dependencies,
-                player,
-                person,
-                TreatyLevel.Peace
-              ) &&
-              !atWar(dependencies, player, person)
-          )
-          .forEach((person: Player) => {
-            const weight = borderIntruders(dependencies, player, person, false);
-
-            if (weight > 0) {
-              counted.set(person, weight);
-            }
-          });
-
-        incidents.set(player, counted);
-      })
+      new Effect((player: Player): void =>
+        countIncidents(dependencies, player, false)
+      )
     ),
     new TurnStart(
       RuleIds.attitudeDrift,

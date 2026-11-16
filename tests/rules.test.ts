@@ -15,7 +15,11 @@ import {
   makePeace,
 } from '@civ-clone/base-diplomacy/lib/declareWar';
 import { attitude, madeToDeclareWar, reputation } from '../lib/relations';
-import { breakTreaties, driftAttitude } from '../lib/rules/turnStart';
+import {
+  borderIntruders,
+  breakTreaties,
+  driftAttitude,
+} from '../lib/rules/turnStart';
 import position, { Side } from './lib/position';
 import { declareWarQuietly } from '../lib/effects';
 import Player from '@civ-clone/core-player/Player';
@@ -275,6 +279,53 @@ describe('treaties', (): void => {
     );
     expect(open.emitted.map(([event]) => event)).include(
       'diplomacy:declaration-expired'
+    );
+  });
+});
+
+describe('border incidents', (): void => {
+  it('counts the first intruded square of each city (the original), or every one (the fix), 1 more on a road, 2 in a fortress', (): void => {
+    const setUp = metAll([{ human: true }, {}]),
+      [person, computer] = setUp.players,
+      square = (...improvements: string[]) => ({
+        isWater: () => false,
+        improvements: improvements.map((name) => {
+          const Named = { [name]: class {} }[name];
+
+          return new Named();
+        }),
+      }),
+      squares = [square('Road'), square('Fortress'), square()],
+      home = { isWater: () => false },
+      city = {
+        player: () => computer,
+        tile: () => home,
+        tiles: () => ({ entries: () => [home, ...squares] }),
+      },
+      soldier = (tile: unknown) => ({
+        player: () => person,
+        attack: () => ({ value: () => 1 }),
+        tile: () => tile,
+      }),
+      dependencies = {
+        ...setUp.dependencies,
+        cityRegistry: {
+          getByPlayer: (player: Player) => (player === computer ? [city] : []),
+          getByTile: () => null,
+        },
+        unitRegistry: {
+          ...setUp.dependencies.unitRegistry,
+          getByTile: (tile: unknown) =>
+            squares.includes(tile as any) ? [soldier(tile)] : [],
+        },
+        tileImprovementRegistry: {
+          getByTile: (tile: any) => tile.improvements ?? [],
+        },
+      } as any;
+
+    expect(borderIntruders(dependencies, computer, person, false)).equal(2);
+    expect(borderIntruders(dependencies, computer, person, true)).equal(
+      2 + 3 + 1
     );
   });
 });

@@ -26,6 +26,15 @@ export declare const borderIntruders: (
   everySquare: boolean
 ) => number;
 /**
+ * The border incidents `computer` counts at the start of its turn, toward each person it has no treaty or war with
+ *  (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
+ */
+export declare const countIncidents: (
+  dependencies: Dependencies,
+  computer: Player,
+  everySquare: boolean
+) => void;
+/**
  * `diplo_review_attitude_delta` (`diplomacy.cpp:6517`): how much colder `computer` grows toward `person` this turn,
  *  starting from `start` (the border incidents' weight, or, in the original with none, a stale value: see
  *  `attitude-drift`).
