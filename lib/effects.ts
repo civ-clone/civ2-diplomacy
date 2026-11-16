@@ -113,8 +113,18 @@ export const expelUnits = (
   let moved = 0;
 
   dependencies.unitRegistry.getByPlayer(player).forEach((unit: Unit) => {
+    const atSea = unit.tile().isWater(),
+      // A unit at sea goes to the nearest of its cities on the coast.
+      homes = atSea
+        ? ownCities.filter((city: City) => city.tile().isCoast())
+        : ownCities;
+
+    if (homes.length === 0) {
+      return;
+    }
+
     const [, hostDistance] = nearest(unit, hostCities),
-      [home, homeDistance] = nearest(unit, ownCities);
+      [home, homeDistance] = nearest(unit, homes);
 
     if (hostDistance >= homeDistance || unit.tile() === home.tile()) {
       return;
@@ -122,6 +132,7 @@ export const expelUnits = (
 
     unit.setTile(home.tile());
     unit.setStatus(null);
+    unit.applyVisibility();
     moved++;
   });
 

@@ -98,7 +98,7 @@ export const getRules = (
       'proposal/resolved/tribute',
       'proposal/resolved/exchange-knowledge'
     ),
-    ...attitudeRules(PREFIX, dependencies),
+    ...attitudeRules(PREFIX, dependencies, meeting),
     ...dialogueRules(PREFIX, dependencies, game.engine),
     ...terminatedRules(PREFIX, dependencies, meeting),
     ...baseDetonatedRules(PREFIX, dependencies),

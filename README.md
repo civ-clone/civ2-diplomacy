@@ -78,12 +78,21 @@ proposals.
 `:war-declared`, `:ally-joins-war`, `:ceasefire-expired`, `:audience-due`, `:treaty-broken` (civ2-enhanced only),
 `:computers-made-peace`, `:computers-went-to-war`, `:contact-lapsed`. Dialogue keys are in `DIALOGUE`.
 
-## Not here
+## Not here, or not as the original
 
-- The original's border violators (a peace partner asked to withdraw or face war, and the Senate scandal it can bring)
-  and the units' warned/intruder marks: every incident counts as a first offence.
-- Espionage incidents (part 2).
-- A rich computer player asking two advances instead of gold for a war; nuclear terms in the war price; alliances
-  between two computer players.
-- An advance's worth is RULES.TXT's value and civilized modifier only, without the original's terms for cities and
+- **Border violators:** the original asks a peace partner whose units stay inside its borders to withdraw or face war
+  (`diplo_review_violators`, with a Senate scandal for a refusal), and marks units as warned. Here every incident is a
+  first offence (a peace partner's counts one less), and the turn-of-signing and recent-contact exceptions are left out.
+- **Incidents:** `INCIDENT` is read (an early audience, a ceasefire's early end) but only part 2's espionage sets it.
+- **An ally's call for help** (`diplo_ally_demand_help`: +100 for refusing, or the alliance cancelled) isn't made.
+- **Declaring war on an ally** is war here (base-diplomacy ends both treaties); the original only cancels the
+  alliance. civ2-unit refuses an attack on an ally, so a person doesn't reach it that way.
+- **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person
+  still reads it. Classic only leaves it unannounced.
+- **A gift of a unit** warms the computer player by 3 × its attack plus defence; the original counts its cost.
+- **Two computer players** meeting don't ally (`diplo_civs_meet_alliance`), and their meeting is a turn-start rule for
+  each pair every fourth turn rather than when their units meet.
+- **Wars for hire:** a rich computer player asking two advances instead of gold, and the nuclear terms of the price.
+- **An advance's worth** is RULES.TXT's value and civilized modifier only, without the original's terms for cities and
   units.
+- **The space race, scenarios and the bloodlust option** in the computer player's evaluation.

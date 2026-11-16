@@ -627,6 +627,8 @@ export const resolvedRules = (
 
         if (home !== undefined) {
           unit.setTile(home.tile());
+          unit.setStatus(null);
+          unit.applyVisibility();
         }
       })
     ),
@@ -647,7 +649,8 @@ export const resolvedRules = (
  */
 export const attitudeRules = (
   prefix: string,
-  dependencies: Dependencies
+  dependencies: Dependencies,
+  talks: Talks
 ): (Accepted | Declined)[] => {
   const adjust = (proposal: IProposal, delta: number, reason: string): void => {
       const sides = sidesOf(dependencies, proposal.negotiation());
@@ -837,6 +840,16 @@ export const attitudeRules = (
 
         if (agendaItemOf(proposal) === AGENDA.alliance) {
           adjust(proposal, 10, 'solidarity');
+
+          const evaluation = talks.evaluationOf(proposal.negotiation(), sides);
+
+          if (
+            evaluation.fear !== 0 &&
+            evaluation.reputation <= 2 &&
+            evaluation.attitude <= 25
+          ) {
+            formAlliance(dependencies, sides.computer, sides.person);
+          }
 
           return;
         }

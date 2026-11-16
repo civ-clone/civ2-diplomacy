@@ -180,8 +180,8 @@ export const borderIntruders = (
 };
 
 /**
- * The border incidents `computer` counts at the start of its turn, toward each person it has no treaty or war with
- *  (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
+ * The border incidents `computer` counts at the start of its turn, toward each person it is neither allied with nor at
+ *  war with (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
  */
 export const countIncidents = (
   dependencies: Dependencies,
@@ -194,7 +194,7 @@ export const countIncidents = (
     .filter(
       (person: Player) =>
         human(dependencies, person) &&
-        !hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace) &&
+        !allied(dependencies, computer, person) &&
         !atWar(dependencies, computer, person)
     )
     .forEach((person: Player) => {
@@ -426,10 +426,18 @@ export const driftAttitude = (
         return;
       }
 
+      // A peace partner's incident is a first offence, one less (`diplo_review_border_incident`, `:6470`).
+      const start =
+        weight === undefined
+          ? 0
+          : hasTreatyLevel(dependencies, computer, person, TreatyLevel.Peace)
+          ? weight - 1
+          : weight;
+
       attitudes.adjust(
         computer,
         person,
-        attitudeDelta(dependencies, computer, person, weight ?? 0),
+        attitudeDelta(dependencies, computer, person, start),
         'drift'
       );
     });

@@ -64,7 +64,7 @@ const getRules = (dependencies, game) => {
         ...(0, mayNegotiate_1.default)(exports.PREFIX, dependencies, read.isHuman, numbers_1.spacing),
         ...(0, talks_1.resolvedRules)(exports.PREFIX, dependencies, game.engine, random),
         ...kept((0, resolved_1.default)(exports.PREFIX, dependencies, random, 0), 'proposal/resolved/tribute', 'proposal/resolved/exchange-knowledge'),
-        ...(0, talks_1.attitudeRules)(exports.PREFIX, dependencies),
+        ...(0, talks_1.attitudeRules)(exports.PREFIX, dependencies, meeting),
         ...(0, talks_1.dialogueRules)(exports.PREFIX, dependencies, game.engine),
         ...(0, talks_1.terminatedRules)(exports.PREFIX, dependencies, meeting),
         ...(0, detonated_1.default)(exports.PREFIX, dependencies),

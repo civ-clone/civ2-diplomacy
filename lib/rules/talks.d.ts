@@ -50,7 +50,8 @@ export declare const resolvedRules: (
  */
 export declare const attitudeRules: (
   prefix: string,
-  dependencies: Dependencies
+  dependencies: Dependencies,
+  talks: Talks
 ) => (Accepted | Declined)[];
 /**
  * What the computer player's dialogues do once the person has heard them (`Resolved` on `Acknowledge`): war, an

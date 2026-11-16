@@ -329,3 +329,63 @@ describe('border incidents', (): void => {
     );
   });
 });
+
+describe('alliances', (): void => {
+  it("sends each side's units nearer the other's cities home: a ship only to a city on the coast", async (): Promise<void> => {
+    const { expelUnits } = await import('../lib/effects'),
+      setUp = position([{ human: true }, {}]),
+      [person, computer] = setUp.players,
+      tile = (name: string, water = false, coast = false) =>
+        ({ name, isWater: () => water, isCoast: () => coast } as any),
+      [near, far, sea, inland, coastal] = [
+        tile('near'),
+        tile('far'),
+        tile('sea', true),
+        tile('inland'),
+        tile('coastal', false, true),
+      ],
+      distances: { [key: string]: number } = {
+        'near-host': 1,
+        'near-inland': 5,
+        'near-coastal': 6,
+        'far-host': 9,
+        'far-inland': 2,
+        'far-coastal': 3,
+        'sea-host': 1,
+        'sea-inland': 4,
+        'sea-coastal': 7,
+      },
+      at = (start: any) => {
+        let current = start;
+
+        return {
+          player: () => person,
+          tile: () => ({
+            ...current,
+            distanceFrom: (to: any) => distances[`${current.name}-${to.name}`],
+          }),
+          setTile: (to: any) => (current = to),
+          setStatus: () => {},
+          applyVisibility: () => {},
+          where: () => current.name,
+        };
+      },
+      units = [at(near), at(far), at(sea)],
+      host = tile('host'),
+      dependencies = {
+        ...setUp.dependencies,
+        cityRegistry: {
+          getByPlayer: (player: any) =>
+            player === person
+              ? [inland, coastal].map((t) => ({ tile: () => t }))
+              : [{ tile: () => host }],
+        },
+        unitRegistry: {
+          getByPlayer: (player: any) => (player === person ? units : []),
+        },
+      } as any;
+
+    expect(expelUnits(dependencies, person, computer)).equal(2);
+    expect(units.map((unit) => unit.where())).eql(['inland', 'far', 'coastal']);
+  });
+});

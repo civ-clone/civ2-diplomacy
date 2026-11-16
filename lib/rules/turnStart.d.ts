@@ -26,8 +26,8 @@ export declare const borderIntruders: (
   everySquare: boolean
 ) => number;
 /**
- * The border incidents `computer` counts at the start of its turn, toward each person it has no treaty or war with
- *  (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
+ * The border incidents `computer` counts at the start of its turn, toward each person it is neither allied with nor at
+ *  war with (`borderIntruders`), kept for its attitude drift this turn. `everySquare` as `borderIntruders`.
  */
 export declare const countIncidents: (
   dependencies: Dependencies,
