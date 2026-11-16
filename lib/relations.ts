@@ -5,6 +5,7 @@ import Player from '@civ-clone/core-player/Player';
 import Reputation from '@civ-clone/core-diplomacy/Reputation';
 import RuleRegistry from '@civ-clone/core-rule/RuleRegistry';
 import Turn from '@civ-clone/core-turn-based-game/Turn';
+import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
 import { declareWar } from '@civ-clone/base-diplomacy/lib/declareWar';
 
 // The one way any civ2-* package reads or changes Civilization II's attitudes and reputations, so every reader keeps
@@ -103,5 +104,25 @@ export const madeToDeclareWar = (
   player: Player,
   other: Player
 ): void => declareWar(dependencies as BaseDependencies, player, other, true);
+
+/**
+ * Every vendetta another player holds against `player` ends (`Vendetta`s in force whose holder, the first of their
+ *  players, isn't `player` and whose target is), as completing the Eiffel Tower and a change of government into Anarchy
+ *  have it (OpenCiv2 `civ.cpp:6794-6812`, `:6863-6868`). Vendettas `player` holds against others stay.
+ */
+export const clearVendettasAgainst = (
+  player: Player,
+  interactionRegistry: InteractionRegistry
+): void =>
+  interactionRegistry
+    .getByPlayer(player)
+    .filter(
+      (interaction): interaction is Vendetta =>
+        interaction instanceof Vendetta &&
+        interaction.active() &&
+        interaction.players()[0] !== player &&
+        interaction.players()[1] === player
+    )
+    .forEach((vendetta: Vendetta) => vendetta.expire(player));
 
 export default attitude;

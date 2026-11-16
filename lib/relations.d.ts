@@ -63,4 +63,13 @@ export declare const madeToDeclareWar: (
   player: Player,
   other: Player
 ) => void;
+/**
+ * Every vendetta another player holds against `player` ends (`Vendetta`s in force whose holder, the first of their
+ *  players, isn't `player` and whose target is), as completing the Eiffel Tower and a change of government into Anarchy
+ *  have it (OpenCiv2 `civ.cpp:6794-6812`, `:6863-6868`). Vendettas `player` holds against others stay.
+ */
+export declare const clearVendettasAgainst: (
+  player: Player,
+  interactionRegistry: InteractionRegistry
+) => void;
 export default attitude;

@@ -1,5 +1,6 @@
 import {
   attitude,
+  clearVendettasAgainst,
   attitudeBands,
   attitudeLevel,
   effectiveReputation,
@@ -10,6 +11,8 @@ import { ownsWonder, pacifies } from '../lib/wonders';
 import DeclaredWar from '@civ-clone/base-diplomacy/Rules/DeclaredWar';
 import Effect from '@civ-clone/core-rule/Effect';
 import { Game } from '@civ-clone/core-game';
+import Never from '@civ-clone/core-diplomacy/Expiries/Never';
+import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
 import GreatWall from '@civ-clone/base-wonder-great-wall/GreatWall';
 import Player from '@civ-clone/core-player/Player';
 import { expect } from 'chai';
@@ -95,5 +98,25 @@ describe('relations', (): void => {
     expect(ownsWonder(registries, a, 'united-nations')).false;
     expect(pacifies(registries, a)).true;
     expect(pacifies(registries, b)).false;
+  });
+
+  it('ends the vendettas held against a player, and leaves those it holds', (): void => {
+    const game = new Game(),
+      [a, b, c] = [
+        new Player(game.rules),
+        new Player(game.rules),
+        new Player(game.rules),
+      ],
+      against = [b, c].map(
+        (holder) => new Vendetta(holder, a, new Never(), game.rules)
+      ),
+      held = new Vendetta(a, b, new Never(), game.rules);
+
+    game.interactions.register(...against, held);
+
+    clearVendettasAgainst(a, game.interactions);
+
+    expect(against.map((vendetta) => vendetta.active())).eql([false, false]);
+    expect(held.active()).true;
   });
 });
