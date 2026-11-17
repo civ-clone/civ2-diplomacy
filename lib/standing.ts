@@ -22,6 +22,7 @@ import Player from '@civ-clone/core-player/Player';
 import Trait from '@civ-clone/core-civilization/Trait';
 import { hasVendetta } from '@civ-clone/library-diplomacy/lib/holds';
 import isHuman from '@civ-clone/civ2-difficulty/isHuman';
+import { launchedPerson } from './spaceRace';
 import { rankings } from '@civ-clone/core-power/lib/rank';
 import { levelOf } from '@civ-clone/civ2-difficulty/level';
 
@@ -175,15 +176,21 @@ export const others = (
     .filter((player: Player) => !players.includes(player));
 
 /**
- * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3118`, `GAME_AI_GANG_UP`): the
+ * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3129`, `GAME_AI_GANG_UP`): the
  *  top-ranked player, when a person, with more than 4 cities and no nuclear weapons, after turn 200 and above
- *  Chieftain; else `null`. The original also alerts them, above King, to a person whose spaceship has launched: not
- *  ported (no spaceships yet).
+ *  Chieftain; and above King, whatever the turn, a person whose spaceship has launched instead (`lib/spaceRace`'s
+ *  `launchedPerson`); else `null`.
  */
 export const gangUpLeader = (
   dependencies: Dependencies,
   nuclear: (player: Player) => number
 ): Player | null => {
+  const launcher = launchedPerson(dependencies);
+
+  if (launcher !== null) {
+    return launcher;
+  }
+
   if (dependencies.turn.value() <= 200 || level(dependencies) === CHIEFTAIN) {
     return null;
   }

@@ -7,11 +7,13 @@ import { Game } from '@civ-clone/core-game';
  */
 export const dependenciesOf = (game: Game): Dependencies => ({
   cityBuildRegistry: game.cityBuilds,
+  cityImprovementRegistry: game.cityImprovements,
   cityRegistry: game.cities,
   clientRegistry: game.clients,
   gameDifficultyRegistry: game.difficulty,
   interactionRegistry: game.interactions,
   landMassRegistry: game.landMasses,
+  pendingEffectRegistry: game.pendingEffects,
   playerGovernmentRegistry: game.playerGovernments,
   playerRegistry: game.players,
   playerResearchRegistry: game.playerResearch,
@@ -19,11 +21,13 @@ export const dependenciesOf = (game: Game): Dependencies => ({
   playerWorldRegistry: game.playerWorlds,
   requirementRegistry: game.requirements,
   ruleRegistry: game.rules,
+  spaceshipRegistry: game.spaceships,
   tileImprovementRegistry: game.tileImprovements,
   traitRegistry: game.traits,
   turn: game.turn,
   unitRegistry: game.units,
   wonderRegistry: game.wonders,
+  year: game.year,
 });
 
 export default dependenciesOf;
