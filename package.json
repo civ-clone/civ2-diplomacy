@@ -65,7 +65,7 @@
     "@civ-clone/base-wonder-unitednations": "^0.1.0",
     "@civ-clone/civ2-difficulty": "github:civ-clone/civ2-difficulty",
     "@civ-clone/civ2-science": "github:civ-clone/civ2-science",
-    "@civ-clone/civ2-spaceship": "github:civ-clone/civ2-spaceship#feat/initial",
+    "@civ-clone/civ2-spaceship": "github:civ-clone/civ2-spaceship",
     "@civ-clone/core-city": "^0.1.25",
     "@civ-clone/core-city-build": "^0.1.23",
     "@civ-clone/core-city-improvement": "^0.1.8",
