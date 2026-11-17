@@ -9,6 +9,7 @@ import Turn from '@civ-clone/core-turn-based-game/Turn';
 import BorderRecord from '../Records/BorderRecord';
 import CallForHelpRecord from '../Records/CallForHelpRecord';
 import WarnedUnitsRecord from '../Records/WarnedUnitsRecord';
+import NuclearDeviceRecord from '../Records/NuclearDeviceRecord';
 import { expect } from 'chai';
 
 // What core-save-game does, in small (as core-diplomacy's own test): each entity written as its saved fields
@@ -181,5 +182,29 @@ describe('saving and loading', (): void => {
     expect(warned.units()).eql(['u1']);
     expect([call.caller(), call.ally(), call.against()]).eql([a, b, c]);
     expect(loaded.getByPlayers(a, b).length).equal(2);
+  });
+
+  it('keeps a nuclear device owed to a civilization not yet met, matching no pair', (): void => {
+    const ruleRegistry = new RuleRegistry(),
+      turn = new Turn(),
+      [holder, planter] = [1, 2].map(() => new Player(ruleRegistry)),
+      interactionRegistry = new InteractionRegistry();
+
+    interactionRegistry.register(
+      new NuclearDeviceRecord(holder, planter, ruleRegistry, turn)
+    );
+
+    const loaded = roundTrip(
+        interactionRegistry,
+        [holder, planter],
+        [NuclearDeviceRecord],
+        ruleRegistry,
+        turn
+      ),
+      [record] = loaded.entries() as NuclearDeviceRecord[];
+
+    expect([record.holder(), record.planter()]).eql([holder, planter]);
+    expect(loaded.getByPlayers(holder, planter)).eql([]);
+    expect(loaded.getByPlayer(holder)).eql([record]);
   });
 });

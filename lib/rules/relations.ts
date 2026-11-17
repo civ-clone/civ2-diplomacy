@@ -3,6 +3,7 @@ import {
   AGGRESSOR_LONG,
   CEASEFIRE_LINGERS,
   CHANGED_THIS_TURN,
+  INCIDENT_OFFERED,
   NUCLEAR_THREAT,
   NUKED,
   RECENT_CONTACT,
@@ -162,7 +163,7 @@ export const createdRules = (
  *   declare it, it costs only with a person on either side.
  * - `<prefix>:declared-war/attitude`: made to declare war, each side's attitude to the other is 100; at another's
  *   request, the one who asked is 5 warmer to the declarer, 15 if it broke a ceasefire or peace, 25 an alliance.
- * - `<prefix>:declared-war/standing`: war this turn; a person who declares war is the aggressor for long, its victim
+ * - `<prefix>:declared-war/standing`: any incident offer between them is answered (`INCIDENT_OFFERED`); war this turn; a person who declares war is the aggressor for long, its victim
  *   holds a vendetta, they were in contact this turn, and its victim's allies join in.
  */
 export const declaredWarRules = (
@@ -300,7 +301,13 @@ export const declaredWarRules = (
       ): void => {
         const quiet = declaringQuietly(by);
 
-        clearBoth(dependencies, by, against, CEASEFIRE_LINGERS);
+        // A war answers any incident offer between them, so it can't later start another one.
+        clearBoth(
+          dependencies,
+          by,
+          against,
+          CEASEFIRE_LINGERS | INCIDENT_OFFERED
+        );
 
         if (broken !== TreatyLevel.Alliance || quiet) {
           setBoth(dependencies, by, against, WAR_THIS_TURN);

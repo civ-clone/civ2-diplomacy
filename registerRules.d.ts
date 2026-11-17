@@ -1,8 +1,9 @@
 import { Game } from '@civ-clone/core-game';
 import Dependencies from './lib/Dependencies';
+import dependenciesOf from './lib/dependenciesOf';
 import Rule from '@civ-clone/core-rule/Rule';
 export declare const PREFIX = 'civ2-diplomacy';
-export declare const dependenciesOf: (game: Game) => Dependencies;
+export { dependenciesOf };
 /**
  * Civilization II's diplomacy (OpenCiv2 `src/auto/diplomacy.cpp`, Classic):
  *
