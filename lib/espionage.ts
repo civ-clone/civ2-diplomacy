@@ -11,6 +11,7 @@ import {
 import {
   activeDeclarations,
   cancelAlliance,
+  declareWar,
 } from '@civ-clone/base-diplomacy/lib/declareWar';
 import { TreatyLevel } from '@civ-clone/base-diplomacy/lib/treatyLevel';
 import { advanceCount, human, inContact, treaty, vendetta } from './standing';
@@ -95,8 +96,9 @@ export const holdVendetta = (
  *   - a person who is the victim may go to war, or end the alliance (`'offered'`; the person's answer is
  *     `incidentOfferAccepted`), unless the perpetrator is Fundamentalist, when nothing at all follows;
  *   - a person who is the perpetrator, against a computer player: under a ceasefire or a peace, a Fundamentalist's
- *     incident is terror (the victim holds a vendetta and is 10 colder), anyone else is made to declare war
- *     (`madeToDeclareWar`, which counts against its reputation); allied, a theft while it knows fewer advances than
+ *     incident is terror (the victim holds a vendetta and is 10 colder), anyone else declares war as if of its own
+ *     accord (`diplo_declare_war(civ, civ2, -1)`, a plain `declareWar`: reputation and credit as for any war it
+ *     chose, but no attitude set to 100, which is `diplo_force_war`'s, not this); allied, a theft while it knows fewer advances than
  *     the victim makes the victim 5 to 19 colder and nothing more, anything else cancels the alliance (war on an ally
  *     is no war, `declared-war/ally`);
  *   - a person who is the perpetrator then faces its Senate: Democracy always, a Republic one time in two, falls into
@@ -154,7 +156,7 @@ export const espionageIncident = (
         attitude(dependencies).adjust(victim, perpetrator, 10, 'terror');
         outcome = tell('terror');
       } else {
-        madeToDeclareWar(dependencies, perpetrator, victim);
+        declareWar(dependencies, perpetrator, victim);
         outcome = tell('war');
       }
     } else {
@@ -173,7 +175,7 @@ export const espionageIncident = (
         return tell('wimp-out');
       }
 
-      madeToDeclareWar(dependencies, perpetrator, victim);
+      declareWar(dependencies, perpetrator, victim);
       outcome = tell('alliance-cancelled');
     }
   }

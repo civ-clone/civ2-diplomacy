@@ -109,6 +109,8 @@ describe('espionage', (): void => {
       expect(espionageIncident(dependencies, perp, vict, () => 0)).equal('war');
       expect(treaty(dependencies, perp, vict)).equal(TreatyLevel.War);
       expect(reputation(dependencies).get(perp)).greaterThan(0);
+      // `diplo_declare_war` sets no attitude: only `diplo_force_war` makes them 100.
+      expect(attitude(dependencies).get(vict, perp)).equal(40);
       expect(scandals).eql([perp]);
     });
   });

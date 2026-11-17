@@ -56,7 +56,7 @@ rules, for whoever brings the government down.
 - **`espionageIncident(dependencies, perpetrator, victim, random, { theft, engine })`** (`diplo_espionage_incident`,
   `diplomacy.cpp:5209-5320`): nothing at war; 20 colder with no treaty; under a treaty, a person who is the victim is
   offered war or the end of the alliance (`incidentOfferAccepted`), unless the perpetrator is Fundamentalist; a person
-  who is the perpetrator, against a computer player, is made to declare war (`madeToDeclareWar`), or with an alliance
+  who is the perpetrator, against a computer player, declares war as if of its own accord (`diplo_declare_war(civ, civ2, -1)`: reputation and credit, attitudes left alone), or with an alliance
   has it cancelled, unless it is Fundamentalist ("terror": a vendetta and 10 colder) or an ally stealing while it knows
   fewer advances (5 to 19 colder, nothing broken); then its Senate may fall (`senateScandal`: Democracy always, a
   Republic one time in two). Returns the outcome and emits `civ2-diplomacy:espionage-incident` (perpetrator, victim,
