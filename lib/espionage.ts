@@ -216,7 +216,10 @@ export const incidentOfferAccepted = (
   perpetrator: Player,
   victim: Player
 ): boolean => {
-  if (!incidentOffered(dependencies, perpetrator, victim)) {
+  if (
+    !incidentOffered(dependencies, perpetrator, victim) ||
+    treaty(dependencies, victim, perpetrator) < TreatyLevel.Ceasefire
+  ) {
     return false;
   }
 
@@ -244,7 +247,7 @@ export const incidentOfferAccepted = (
  *   `declared-war/ally` has it);
  * - any peace or alliance ends;
  * - once they've met: a war is in force (a `War`, with no declaration when there isn't one), any ceasefire left ends
- *   with it, both attitudes are 100, and `player` is marked as having attacked without declaring war
+ *   with it, both attitudes are 100, the war is this turn's both ways (`WAR_THIS_TURN`, `:4168-4170`), and `player` is marked as having attacked without declaring war
  *   (`SNEAK_ATTACK`) unless either already is.
  *
  * Returns whether it was marked: the original then has the victim's allies join the war after a battle
@@ -257,6 +260,8 @@ export const forceWar = (
   enemy: Player
 ): boolean => {
   clearBoth(dependencies, player, enemy, HOSTILE_INTENT | BROKEN);
+  // A war forced on them answers any incident offer between them.
+  clearBoth(dependencies, player, enemy, INCIDENT_OFFERED);
 
   const level = treaty(dependencies, player, enemy);
 
@@ -289,6 +294,9 @@ export const forceWar = (
 
   attitudes.set(player, enemy, 100, 'forced-war');
   attitudes.set(enemy, player, 100, 'forced-war');
+  // `diplo_set_treaty_flags(civ, civ2, 0x2000)` marks the war this turn both ways (`diplomacy.cpp:4168-4170`), so an
+  //  audience that turn is refused.
+  setBoth(dependencies, player, enemy, WAR_THIS_TURN);
 
   if (
     hasFlag(dependencies, enemy, player, SNEAK_ATTACK) ||

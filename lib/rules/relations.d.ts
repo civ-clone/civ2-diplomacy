@@ -30,7 +30,7 @@ export declare const createdRules: (
  *   declare it, it costs only with a person on either side.
  * - `<prefix>:declared-war/attitude`: made to declare war, each side's attitude to the other is 100; at another's
  *   request, the one who asked is 5 warmer to the declarer, 15 if it broke a ceasefire or peace, 25 an alliance.
- * - `<prefix>:declared-war/standing`: war this turn; a person who declares war is the aggressor for long, its victim
+ * - `<prefix>:declared-war/standing`: any incident offer between them is answered (`INCIDENT_OFFERED`); war this turn; a person who declares war is the aggressor for long, its victim
  *   holds a vendetta, they were in contact this turn, and its victim's allies join in.
  */
 export declare const declaredWarRules: (

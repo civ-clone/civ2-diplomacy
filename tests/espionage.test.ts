@@ -8,11 +8,13 @@ import {
   nuclearDeviceDiscovered,
 } from '../lib/espionage';
 import {
+  declareWar,
   makeAlliance,
   makeCeasefire,
   makePeace,
 } from '@civ-clone/base-diplomacy/lib/declareWar';
-import { SNEAK_ATTACK, hasFlag } from '../lib/flags';
+import { SNEAK_ATTACK, WAR_THIS_TURN, hasFlag } from '../lib/flags';
+import Defeated from '@civ-clone/core-player/Rules/Defeated';
 import { TreatyLevel } from '@civ-clone/base-diplomacy/lib/treatyLevel';
 import { Bronze, Side, Wheel, position } from './lib/position';
 import AgentLost from '@civ-clone/base-unit-agent/Rules/AgentLost';
@@ -264,6 +266,46 @@ describe('espionage', (): void => {
       TreatyLevel.Peace
     );
 
+    // A stale offer: answered by a war forced on them since, or by a treaty signed since.
+    const forced = setUp({}, { human: true }, TreatyLevel.Peace);
+
+    espionageIncident(forced.dependencies, forced.perp, forced.vict, () => 0);
+    forceWar(forced.dependencies, forced.perp, forced.vict);
+    expect(incidentOffered(forced.dependencies, forced.perp, forced.vict))
+      .false;
+    expect(incidentOfferAccepted(forced.dependencies, forced.perp, forced.vict))
+      .false;
+
+    const declared = setUp({}, { human: true }, TreatyLevel.Peace);
+
+    espionageIncident(
+      declared.dependencies,
+      declared.perp,
+      declared.vict,
+      () => 0
+    );
+    declareWar(declared.dependencies, declared.perp, declared.vict);
+    expect(incidentOffered(declared.dependencies, declared.perp, declared.vict))
+      .false;
+
+    const resigned = setUp({}, { human: true }, TreatyLevel.Ceasefire);
+
+    espionageIncident(
+      resigned.dependencies,
+      resigned.perp,
+      resigned.vict,
+      () => 0
+    );
+    makePeace(resigned.dependencies, resigned.perp, resigned.vict);
+    expect(incidentOffered(resigned.dependencies, resigned.perp, resigned.vict))
+      .false;
+    expect(
+      incidentOfferAccepted(resigned.dependencies, resigned.perp, resigned.vict)
+    ).false;
+    expect(treaty(resigned.dependencies, resigned.perp, resigned.vict)).equal(
+      TreatyLevel.Peace
+    );
+
     const terror = setUp(
       { government: 'fundamentalism' },
       { human: true },
@@ -313,6 +355,26 @@ describe('espionage', (): void => {
     expect(reputation(allied.dependencies).get(allied.perp)).greaterThan(0);
     expect(vendetta(allied.dependencies, allied.vict, allied.perp)).true;
     expect(allied.attitudes.get(allied.vict, allied.perp)).equal(100);
+    // `diplo_set_treaty_flags(civ, civ2, 0x2000)`: this turn's war both ways (`diplomacy.cpp:4168-4170`).
+    expect(
+      hasFlag(allied.dependencies, allied.perp, allied.vict, WAR_THIS_TURN)
+    ).true;
+    expect(
+      hasFlag(allied.dependencies, allied.vict, allied.perp, WAR_THIS_TURN)
+    ).true;
+
+    const contact = setUp({}, {});
+
+    forceWar(contact.dependencies, contact.perp, contact.vict);
+    expect(treaty(contact.dependencies, contact.perp, contact.vict)).equal(
+      TreatyLevel.War
+    );
+    expect(
+      hasFlag(contact.dependencies, contact.perp, contact.vict, WAR_THIS_TURN)
+    ).true;
+    expect(
+      hasFlag(contact.dependencies, contact.vict, contact.perp, WAR_THIS_TURN)
+    ).true;
 
     const computers = setUp({}, {}, TreatyLevel.Alliance);
 
@@ -414,6 +476,30 @@ describe('espionage', (): void => {
     expect(
       game.interactionRegistry
         .getByPlayer(unmet)
+        .filter((record) => record instanceof NuclearDeviceRecord).length
+    ).equal(0);
+
+    // A civilization destroyed: what it owed or was owed goes.
+    const later = position([{}, {}, {}]),
+      [bomber, far, gone] = later.players;
+
+    nuclearDeviceDiscovered(later.dependencies, bomber);
+    expect(
+      later.interactionRegistry
+        .entries()
+        .filter((record) => record instanceof NuclearDeviceRecord).length
+    ).equal(2);
+    later.ruleRegistry.process(Defeated, gone, null);
+    expect(
+      later.interactionRegistry
+        .entries()
+        .filter((record) => record instanceof NuclearDeviceRecord)
+        .map((record) => (record as NuclearDeviceRecord).holder())
+    ).eql([far]);
+    later.ruleRegistry.process(Defeated, bomber, null);
+    expect(
+      later.interactionRegistry
+        .entries()
         .filter((record) => record instanceof NuclearDeviceRecord).length
     ).equal(0);
   });

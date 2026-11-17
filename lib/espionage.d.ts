@@ -84,7 +84,7 @@ export declare const incidentOfferAccepted: (
  *   `declared-war/ally` has it);
  * - any peace or alliance ends;
  * - once they've met: a war is in force (a `War`, with no declaration when there isn't one), any ceasefire left ends
- *   with it, both attitudes are 100, and `player` is marked as having attacked without declaring war
+ *   with it, both attitudes are 100, the war is this turn's both ways (`WAR_THIS_TURN`, `:4168-4170`), and `player` is marked as having attacked without declaring war
  *   (`SNEAK_ATTACK`) unless either already is.
  *
  * Returns whether it was marked: the original then has the victim's allies join the war after a battle

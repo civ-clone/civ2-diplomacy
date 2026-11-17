@@ -10,6 +10,11 @@ import PoisonWater from '@civ-clone/base-unit-action-poison-water/PoisonWater';
 import StealTechnology from '@civ-clone/base-unit-action-steal-technology/StealTechnology';
 import Unit from '@civ-clone/core-unit/Unit';
 import { applyPendingNuclearDevice, espionageIncident } from '../espionage';
+import { INCIDENT_OFFERED, clearBoth } from '../flags';
+import Ceasefire from '@civ-clone/base-diplomacy-declaration-ceasefire/Ceasefire';
+import Defeated from '@civ-clone/core-player/Rules/Defeated';
+import NuclearDeviceRecord from '../../Records/NuclearDeviceRecord';
+import Peace from '@civ-clone/base-diplomacy-declaration-peace/Peace';
 import Contact from '@civ-clone/base-diplomacy-interaction-contact/Contact';
 import Created from '@civ-clone/core-diplomacy/Rules/Interaction/Created';
 import Interaction from '@civ-clone/core-diplomacy/Interaction';
@@ -95,5 +100,58 @@ export const nuclearDeviceRules = (
       applyPendingNuclearDevice(dependencies, player, other);
       applyPendingNuclearDevice(dependencies, other, player);
     })
+  ),
+];
+
+/**
+ * `<prefix>:interaction/created/treaty-answers-incident`: a ceasefire, peace or alliance signed between two players
+ *  answers any incident offer between them (`INCIDENT_OFFERED`), so an old offer can't start a war under the new
+ *  treaty.
+ */
+export const incidentOfferRules = (
+  prefix: string,
+  dependencies: Dependencies
+): Created[] => [
+  new Created(
+    `${prefix}:interaction/created/treaty-answers-incident`,
+    new Criterion(
+      (interaction: Interaction): boolean =>
+        interaction instanceof Ceasefire || interaction instanceof Peace
+    ),
+    new Effect((interaction: Interaction): void => {
+      const [player, other] = interaction.players();
+
+      if (player === undefined || other === undefined || player === other) {
+        return;
+      }
+
+      clearBoth(dependencies, player, other, INCIDENT_OFFERED);
+    })
+  ),
+];
+
+/**
+ * `<prefix>:player/defeated/nuclear-device`: a civilization destroyed owes and is owed no nuclear device's war any more
+ *  (`NuclearDeviceRecord`s held by it or against it go).
+ */
+export const defeatedRules = (
+  prefix: string,
+  dependencies: Dependencies
+): Defeated[] => [
+  new Defeated(
+    `${prefix}:player/defeated/nuclear-device`,
+    new Effect((player: Player): void =>
+      dependencies.interactionRegistry
+        .entries()
+        .filter(
+          (interaction): interaction is NuclearDeviceRecord =>
+            interaction instanceof NuclearDeviceRecord &&
+            (interaction.holder() === player ||
+              interaction.planter() === player)
+        )
+        .forEach((record) =>
+          dependencies.interactionRegistry.unregister(record)
+        )
+    )
   ),
 ];

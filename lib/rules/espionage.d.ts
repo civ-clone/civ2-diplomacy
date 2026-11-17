@@ -4,6 +4,7 @@ import Engine from '@civ-clone/core-engine/Engine';
 import IndustrialSabotage from '@civ-clone/base-unit-action-industrial-sabotage/IndustrialSabotage';
 import PoisonWater from '@civ-clone/base-unit-action-poison-water/PoisonWater';
 import StealTechnology from '@civ-clone/base-unit-action-steal-technology/StealTechnology';
+import Defeated from '@civ-clone/core-player/Rules/Defeated';
 import Created from '@civ-clone/core-diplomacy/Rules/Interaction/Created';
 /**
  * The missions whose lost agent raises an incident: those that call `spy_try_escape` with the victim
@@ -38,3 +39,20 @@ export declare const nuclearDeviceRules: (
   prefix: string,
   dependencies: Dependencies
 ) => Created[];
+/**
+ * `<prefix>:interaction/created/treaty-answers-incident`: a ceasefire, peace or alliance signed between two players
+ *  answers any incident offer between them (`INCIDENT_OFFERED`), so an old offer can't start a war under the new
+ *  treaty.
+ */
+export declare const incidentOfferRules: (
+  prefix: string,
+  dependencies: Dependencies
+) => Created[];
+/**
+ * `<prefix>:player/defeated/nuclear-device`: a civilization destroyed owes and is owed no nuclear device's war any more
+ *  (`NuclearDeviceRecord`s held by it or against it go).
+ */
+export declare const defeatedRules: (
+  prefix: string,
+  dependencies: Dependencies
+) => Defeated[];

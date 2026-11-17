@@ -65,11 +65,13 @@ rules, for whoever brings the government down.
   industrial sabotage or poisoning water (not one caught before it) raises an incident with the city's owner, unless
   that is the barbarians.
 - **The offer to a person who is the victim** is kept as our own treaty bit (`INCIDENT_OFFERED`, in the saved
-  `TreatyFlagsRecord`): `incidentOffered`, `incidentOfferAccepted` (refused, `false`, with no offer) and
-  `incidentOfferDeclined`.
+  `TreatyFlagsRecord`): `incidentOffered`, `incidentOfferAccepted` (refused, `false`, with no offer or below a ceasefire) and
+  `incidentOfferDeclined`. Any war between the two (declared or forced) and any treaty signed between them answer it
+  (`civ2-diplomacy:interaction/created/treaty-answers-incident`).
 - **`forceWar(dependencies, player, enemy)`** (`diplo_force_war`, `:6861-6887`): the war an attack or a capture across a
   treaty makes (an alliance counts, as the original's peace bit is set beside it: a person's ally is cancelled by a
-  declaration first), both attitudes 100, a sneak attack marked once (it returns whether, so a battle can call
+  declaration first), both attitudes 100, this turn's war both ways
+  (`WAR_THIS_TURN`, `:4168-4170`), a sneak attack marked once (it returns whether, so a battle can call
   `alliesJoinWar`).
 - **`incited(dependencies, inciter, victim, doubled, random, options)`**: at the plain price an incident and a forced
   war; at the doubled price, offered only under a treaty, the victim holds a vendetta instead
@@ -77,7 +79,8 @@ rules, for whoever brings the government down.
 - **`nuclearDeviceDiscovered(dependencies, player, engine?)`** (`unit_spy.cpp:705-712`): every other civilization is
   100 colder and at war with it, with no reputation lost; one it hasn't met keeps a `NuclearDeviceRecord` (saved;
   keyed on that civilization alone, so nobody counts as met) and both apply when they meet
-  (`civ2-diplomacy:interaction/created/nuclear-device`, `Low`, after the attitude is seeded). The roll (½, a veteran ¼, never a Fundamentalist) is
+  (`civ2-diplomacy:interaction/created/nuclear-device`, `Low`, after the attitude is seeded). A civilization
+  destroyed drops those it holds or is owed (`civ2-diplomacy:player/defeated/nuclear-device`). The roll (½, a veteran ¼, never a Fundamentalist) is
   the mission's.
 - **`holdVendetta(dependencies, holder, against)`**, and **`dependenciesOf(game)`** (`lib/dependenciesOf`) for callers
   in other packages.
