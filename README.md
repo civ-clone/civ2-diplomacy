@@ -51,6 +51,30 @@ steps in, and a Republic's only while in session (one turn in three it changes).
 (`SenateRecord`). base-diplomacy's `Readers.hasSenate` asks it. A scandal (`senateScandal`) tells the `SenateScandal`
 rules, for whoever brings the government down.
 
+## Espionage (`lib/espionage`, `lib/rules/espionage`)
+
+- **`espionageIncident(dependencies, perpetrator, victim, random, { theft, engine })`** (`diplo_espionage_incident`,
+  `diplomacy.cpp:5209-5320`): nothing at war; 20 colder with no treaty; under a treaty, a person who is the victim is
+  offered war or the end of the alliance (`incidentOfferAccepted`), unless the perpetrator is Fundamentalist; a person
+  who is the perpetrator, against a computer player, is made to declare war (`madeToDeclareWar`), or with an alliance
+  has it cancelled, unless it is Fundamentalist ("terror": a vendetta and 10 colder) or an ally stealing while it knows
+  fewer advances (5 to 19 colder, nothing broken); then its Senate may fall (`senateScandal`: Democracy always, a
+  Republic one time in two). Returns the outcome and emits `civ2-diplomacy:espionage-incident` (perpetrator, victim,
+  outcome); a scandal's notice is the `SenateScandal` rule's (civ2-government emits `civ2-government:senate-scandal`).
+- **`AgentLost`** (`civ2-diplomacy:agent-lost/espionage-incident`): an agent removed after stealing an advance,
+  industrial sabotage or poisoning water (not one caught before it) raises an incident with the city's owner.
+- **`forceWar(dependencies, player, enemy)`** (`diplo_force_war`, `:6861-6887`): the war an attack or a capture across a
+  treaty makes, both attitudes 100, a sneak attack marked once (it returns whether, so a battle can call
+  `alliesJoinWar`).
+- **`incited(dependencies, inciter, victim, doubled, random, options)`**: at the plain price an incident and a forced
+  war; at the doubled price, offered only under a treaty, the victim holds a vendetta instead
+  (`unit_spy.cpp:835-846`, `city.cpp:5404`). The founder and the capture's `INCIDENT` are the city's.
+- **`nuclearDeviceDiscovered(dependencies, player, engine?)`** (`unit_spy.cpp:705-712`): every other civilization it has
+  met is 100 colder and at war with it, with no reputation lost. The roll (½, a veteran ¼, never a Fundamentalist) is
+  the mission's.
+- **`holdVendetta(dependencies, holder, against)`**, and **`dependenciesOf(game)`** (`lib/dependenciesOf`) for callers
+  in other packages.
+
 ## The start of each turn (`lib/rules/turnStart`)
 
 Turn bits cleared; the Senate's roll; patience; a computer player breaking a treaty it means to (`TREATY_BREAKING_RULE`,
@@ -110,4 +134,8 @@ proposals.
   threat mark the evaluation sets.
 - **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person still
   reads it (`BROKEN` and `AGGRESSOR_LONG` are kept as the original sets them). Classic only leaves it unannounced.
-- **Espionage incidents** (part 2) are the other source of `INCIDENT`.
+- **A discovered nuclear device** turns only the civilizations its planter has met against it; the original sets the war
+  bit with everyone, met or not, but here a war needs contact.
+- **A person offered war after an incident** (`'offered'`) answers through the renderer, which calls
+  `incidentOfferAccepted`; until stage X wires it, the offer is only announced. Espionage sets no `INCIDENT` (the
+  original's `diplo_espionage_incident` doesn't either: a capture and a nuclear threat do).

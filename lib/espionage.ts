@@ -1,0 +1,348 @@
+import {
+  BROKEN,
+  HOSTILE_INTENT,
+  SNEAK_ATTACK,
+  WAR_THIS_TURN,
+  clearBoth,
+  hasFlag,
+  setBoth,
+  setFlag,
+} from './flags';
+import {
+  activeDeclarations,
+  cancelAlliance,
+} from '@civ-clone/base-diplomacy/lib/declareWar';
+import { TreatyLevel } from '@civ-clone/base-diplomacy/lib/treatyLevel';
+import { advanceCount, human, inContact, treaty, vendetta } from './standing';
+import { attitude, madeToDeclareWar } from './relations';
+import Ceasefire from '@civ-clone/base-diplomacy-declaration-ceasefire/Ceasefire';
+import Dependencies from './Dependencies';
+import Engine from '@civ-clone/core-engine/Engine';
+import Fundamentalism from '@civ-clone/base-government-fundamentalism/Fundamentalism';
+import Never from '@civ-clone/core-diplomacy/Expiries/Never';
+import Peace from '@civ-clone/base-diplomacy-declaration-peace/Peace';
+import Player from '@civ-clone/core-player/Player';
+import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
+import War from '@civ-clone/base-diplomacy-declaration-war/War';
+import { declareWarQuietly } from './effects';
+import isBarbarian from '@civ-clone/base-civilization-barbarian/isBarbarian';
+import { recordContact } from '@civ-clone/base-diplomacy/lib/lastContact';
+import { senateScandal } from './senate';
+
+// Espionage and its diplomatic cost (OpenCiv2 `diplo_espionage_incident`, `diplomacy.cpp:5209-5320`; `diplo_force_war`,
+//  `:6861-6887`; the incite and the planted nuclear device of `unit_spy.cpp`). civ2-unit and civ2-city call these; the
+//  incident after a mission is also this package's own `AgentLost` rule (`lib/rules/espionage`).
+
+/** What an incident came to, for a notice. */
+export type IncidentOutcome =
+  // At war: nothing.
+  | 'none'
+  // No treaty: the victim is 20 colder.
+  | 'attitude'
+  // The victim, a person under a treaty, may go to war (or end the alliance): `incidentOfferAccepted`.
+  | 'offered'
+  // A Fundamentalist person's incident under a peace or ceasefire: a vendetta and 10 colder, no war.
+  | 'terror'
+  // The person is made to declare war.
+  | 'war'
+  // The person's alliance is cancelled (a declaration of war on an ally).
+  | 'alliance-cancelled'
+  // An allied person stealing while behind: 5 to 19 colder, nothing broken.
+  | 'wimp-out';
+
+export interface IncidentOptions {
+  /** The mission was a theft of an advance (the original's `spy_last_mission == 2`). */
+  theft?: boolean;
+  /** Where `civ2-diplomacy:espionage-incident` is emitted. A scandal's notice is the `SenateScandal` rule's. */
+  engine?: Pick<Engine, 'emit'>;
+}
+
+const fundamentalist = (
+  dependencies: Dependencies,
+  player: Player
+): boolean => {
+  try {
+    return dependencies.playerGovernmentRegistry
+      .getByPlayer(player)
+      .is(Fundamentalism);
+  } catch (e) {
+    return false;
+  }
+};
+
+/** `holder` holds a vendetta against `against` (`TREATY_VENDETTA`), unless it already does. */
+export const holdVendetta = (
+  dependencies: Pick<Dependencies, 'interactionRegistry' | 'ruleRegistry'>,
+  holder: Player,
+  against: Player
+): void => {
+  if (vendetta(dependencies as Dependencies, holder, against)) {
+    return;
+  }
+
+  dependencies.interactionRegistry.register(
+    new Vendetta(holder, against, new Never(), dependencies.ruleRegistry)
+  );
+};
+
+/**
+ * `diplo_espionage_incident(perpetrator, victim)` (`diplomacy.cpp:5209-5320`), after a mission whose agent was removed
+ *  (a Diplomat, or a Spy that failed to escape), or after a city is incited at the plain price:
+ *
+ * - at war, nothing;
+ * - with no ceasefire, peace or alliance, the victim is 20 colder to the perpetrator;
+ * - under a treaty:
+ *   - a person who is the victim may go to war, or end the alliance (`'offered'`; the person's answer is
+ *     `incidentOfferAccepted`), unless the perpetrator is Fundamentalist, when nothing at all follows;
+ *   - a person who is the perpetrator, against a computer player: under a ceasefire or a peace, a Fundamentalist's
+ *     incident is terror (the victim holds a vendetta and is 10 colder), anyone else is made to declare war
+ *     (`madeToDeclareWar`, which counts against its reputation); allied, a theft while it knows fewer advances than
+ *     the victim makes the victim 5 to 19 colder and nothing more, anything else cancels the alliance (war on an ally
+ *     is no war, `declared-war/ally`);
+ *   - a person who is the perpetrator then faces its Senate: Democracy always, a Republic one time in two, falls into
+ *     Anarchy (`senateScandal`, the `SenateScandal` rules).
+ *
+ * The original sets no `INCIDENT` bit here. Returns what came of it.
+ */
+export const espionageIncident = (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player,
+  random: () => number,
+  { theft = false, engine }: IncidentOptions = {}
+): IncidentOutcome => {
+  const level = treaty(dependencies, victim, perpetrator),
+    tell = (outcome: IncidentOutcome): IncidentOutcome => {
+      engine?.emit(
+        'civ2-diplomacy:espionage-incident',
+        perpetrator,
+        victim,
+        outcome
+      );
+
+      return outcome;
+    };
+
+  if (level === TreatyLevel.War) {
+    return 'none';
+  }
+
+  if (level === TreatyLevel.Contact) {
+    const attitudes = attitude(dependencies);
+
+    if (attitudes.get(victim, perpetrator) !== undefined) {
+      attitudes.adjust(victim, perpetrator, 20, 'espionage');
+    }
+
+    return tell('attitude');
+  }
+
+  let outcome: IncidentOutcome = 'none';
+
+  if (human(dependencies, victim)) {
+    if (fundamentalist(dependencies, perpetrator)) {
+      return 'none';
+    }
+
+    outcome = tell('offered');
+  }
+
+  if (human(dependencies, perpetrator) && !human(dependencies, victim)) {
+    if (level !== TreatyLevel.Alliance) {
+      if (fundamentalist(dependencies, perpetrator)) {
+        holdVendetta(dependencies, victim, perpetrator);
+        attitude(dependencies).adjust(victim, perpetrator, 10, 'terror');
+        outcome = tell('terror');
+      } else {
+        madeToDeclareWar(dependencies, perpetrator, victim);
+        outcome = tell('war');
+      }
+    } else {
+      if (
+        theft &&
+        advanceCount(dependencies, perpetrator) <
+          advanceCount(dependencies, victim)
+      ) {
+        attitude(dependencies).adjust(
+          victim,
+          perpetrator,
+          Math.floor(random() * 15) + 5,
+          'wimp-out'
+        );
+
+        return tell('wimp-out');
+      }
+
+      madeToDeclareWar(dependencies, perpetrator, victim);
+      outcome = tell('alliance-cancelled');
+    }
+  }
+
+  if (human(dependencies, perpetrator)) {
+    senateScandal(dependencies, perpetrator, victim, random);
+  }
+
+  return outcome;
+};
+
+/**
+ * A person, the victim of an incident under a treaty, takes the chance it was offered (`diplomacy.cpp:5232-5251`):
+ *  with an alliance, the alliance ends and they stay at peace; otherwise they are at war, with no declaration and no
+ *  reputation lost (the original sets the war bit). They were in contact this turn.
+ */
+export const incidentOfferAccepted = (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player
+): void => {
+  if (treaty(dependencies, victim, perpetrator) === TreatyLevel.Alliance) {
+    cancelAlliance(dependencies, victim, perpetrator);
+  } else {
+    declareWarQuietly(dependencies, victim, perpetrator);
+  }
+
+  recordContact(dependencies, victim, perpetrator, dependencies.turn.value());
+};
+
+/**
+ * `diplo_force_war(player, enemy)` (`diplomacy.cpp:6861-6887`), after an attack across a treaty or a capture (an
+ *  incited city's included):
+ * - any intent of either to break their treaty, and any treaty one of them broke, is forgotten
+ *   (`TREATY_HOSTILE_INTENT | TREATY_BROKEN`);
+ * - under a ceasefire or a peace with a person on either side, `player` is made to declare war (`madeToDeclareWar`,
+ *   which counts against its reputation);
+ * - any peace or alliance ends;
+ * - once they've met: a war is in force (a `War`, with no declaration when there isn't one), any ceasefire left ends
+ *   with it, both attitudes are 100, and `player` is marked as having attacked without declaring war
+ *   (`SNEAK_ATTACK`) unless either already is.
+ *
+ * Returns whether it was marked: the original then has the victim's allies join the war after a battle
+ *  (`alliesJoinWar`, `unit_combat.cpp:1593`), but not after a capture or an incited city (`city.cpp:5405`), so that is
+ *  the caller's to do.
+ */
+export const forceWar = (
+  dependencies: Dependencies,
+  player: Player,
+  enemy: Player
+): boolean => {
+  clearBoth(dependencies, player, enemy, HOSTILE_INTENT | BROKEN);
+
+  const level = treaty(dependencies, player, enemy);
+
+  if (
+    (level === TreatyLevel.Ceasefire || level === TreatyLevel.Peace) &&
+    (human(dependencies, player) || human(dependencies, enemy))
+  ) {
+    madeToDeclareWar(dependencies, player, enemy);
+  }
+
+  activeDeclarations(dependencies, Peace, player, enemy).forEach((peace) =>
+    peace.expire(player)
+  );
+
+  if (!inContact(dependencies, player, enemy)) {
+    return false;
+  }
+
+  if (activeDeclarations(dependencies, War, player, enemy).length === 0) {
+    dependencies.interactionRegistry.register(
+      new War(player, enemy, new Never(), dependencies.ruleRegistry)
+    );
+  }
+
+  activeDeclarations(dependencies, Ceasefire, player, enemy).forEach(
+    (ceasefire) => ceasefire.expire(player)
+  );
+
+  const attitudes = attitude(dependencies);
+
+  attitudes.set(player, enemy, 100, 'forced-war');
+  attitudes.set(enemy, player, 100, 'forced-war');
+
+  if (
+    hasFlag(dependencies, enemy, player, SNEAK_ATTACK) ||
+    hasFlag(dependencies, player, enemy, SNEAK_ATTACK)
+  ) {
+    return false;
+  }
+
+  setFlag(dependencies, player, enemy, SNEAK_ATTACK);
+
+  return true;
+};
+
+/**
+ * What inciting a city does between the two, once paid (`unit_spy.cpp:835-846`, then the capture's `diplo_force_war`
+ *  when `capture_mode < 2`, `city.cpp:5404`):
+ * - at the plain price, an incident (`espionageIncident`), then a forced war (`forceWar`; no allies join);
+ * - at the doubled price, offered only under a treaty, neither: the victim holds a vendetta against the inciter.
+ *
+ * The rest is the city's: the inciter becoming its founder at the doubled price, and the `INCIDENT` bit any capture
+ *  involving a person sets.
+ */
+export const incited = (
+  dependencies: Dependencies,
+  inciter: Player,
+  victim: Player,
+  doubled: boolean,
+  random: () => number,
+  options: IncidentOptions = {}
+): void => {
+  if (doubled) {
+    holdVendetta(dependencies, victim, inciter);
+
+    return;
+  }
+
+  espionageIncident(dependencies, inciter, victim, random, options);
+  forceWar(dependencies, inciter, victim);
+};
+
+/**
+ * A planted nuclear device is discovered (`unit_spy.cpp:705-712`): every other civilization is 100 colder toward
+ *  `player` and at war with it, with no declaration and no reputation lost (the original sets the war bit). The
+ *  barbarians are left out, as the original's loop starts at 1, and so is any civilization `player` hasn't met (the
+ *  original sets the bit anyway; here a war needs contact). Whether it is discovered (½, a veteran ¼, never a
+ *  Fundamentalist) is the mission's. Returns the civilizations now at war with it.
+ */
+export const nuclearDeviceDiscovered = (
+  dependencies: Dependencies,
+  player: Player,
+  engine?: Pick<Engine, 'emit'>
+): Player[] => {
+  const attitudes = attitude(dependencies),
+    enemies = dependencies.playerRegistry
+      .entries()
+      .filter(
+        (other: Player) =>
+          other !== player &&
+          !barbarian(other) &&
+          inContact(dependencies, player, other)
+      );
+
+  enemies.forEach((other: Player) => {
+    if (attitudes.get(other, player) !== undefined) {
+      attitudes.adjust(other, player, 100, 'nuclear-device');
+    }
+
+    if (treaty(dependencies, player, other) !== TreatyLevel.War) {
+      declareWarQuietly(dependencies, player, other);
+    }
+
+    setBoth(dependencies, player, other, WAR_THIS_TURN);
+  });
+
+  engine?.emit('civ2-diplomacy:nuclear-device-discovered', player, enemies);
+
+  return enemies;
+};
+
+const barbarian = (player: Player): boolean => {
+  try {
+    return isBarbarian(player);
+  } catch (e) {
+    return false;
+  }
+};
+
+export default espionageIncident;

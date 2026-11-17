@@ -4,6 +4,8 @@ exports.register = exports.getRules = exports.dependenciesOf = exports.PREFIX = 
 const talks_1 = require("./lib/rules/talks");
 const relations_1 = require("./lib/rules/relations");
 const core_game_1 = require("@civ-clone/core-game");
+const dependenciesOf_1 = require("./lib/dependenciesOf");
+exports.dependenciesOf = dependenciesOf_1.default;
 const Effect_1 = require("@civ-clone/core-rule/Effect");
 const RuleIds_1 = require("./RuleIds");
 const SenateIntervenes_1 = require("@civ-clone/base-government-senate/Rules/SenateIntervenes");
@@ -17,28 +19,8 @@ const numbers_1 = require("./lib/numbers");
 const talks_2 = require("./lib/talks");
 const turnStart_1 = require("./lib/rules/turnStart");
 const civsMeet_1 = require("./lib/rules/civsMeet");
+const espionage_1 = require("./lib/rules/espionage");
 exports.PREFIX = 'civ2-diplomacy';
-const dependenciesOf = (game) => ({
-    cityBuildRegistry: game.cityBuilds,
-    cityRegistry: game.cities,
-    clientRegistry: game.clients,
-    gameDifficultyRegistry: game.difficulty,
-    interactionRegistry: game.interactions,
-    landMassRegistry: game.landMasses,
-    playerGovernmentRegistry: game.playerGovernments,
-    playerRegistry: game.players,
-    playerResearchRegistry: game.playerResearch,
-    playerTreasuryRegistry: game.playerTreasuries,
-    playerWorldRegistry: game.playerWorlds,
-    requirementRegistry: game.requirements,
-    ruleRegistry: game.rules,
-    tileImprovementRegistry: game.tileImprovements,
-    traitRegistry: game.traits,
-    turn: game.turn,
-    unitRegistry: game.units,
-    wonderRegistry: game.wonders,
-});
-exports.dependenciesOf = dependenciesOf;
 // The rules base-diplomacy's assemblers make that Civilization II keeps: registering each step of a negotiation, and
 //  the payment of tribute and the exchange of advances when they're accepted.
 const kept = (rules, ...names) => rules.filter((rule) => names.some((name) => rule.id() === `${exports.PREFIX}:${name}`));
@@ -77,11 +59,12 @@ const getRules = (dependencies, game) => {
         ...(0, relations_1.declaredWarRules)(exports.PREFIX, dependencies, game.engine),
         ...(0, turnStart_1.turnStartRules)(exports.PREFIX, dependencies, pairs),
         ...(0, civsMeet_1.default)(exports.PREFIX, dependencies, pairs),
+        ...(0, espionage_1.default)(exports.PREFIX, dependencies, game.engine, random),
         new SenateIntervenes_1.default(RuleIds_1.SENATE_RULE, new Effect_1.default((player, other, context) => (0, senate_1.civ2SenateIntervenes)(dependencies, player, other, context))),
     ];
 };
 exports.getRules = getRules;
-const register = (game) => game.rules.register(...(0, exports.getRules)((0, exports.dependenciesOf)(game), game));
+const register = (game) => game.rules.register(...(0, exports.getRules)((0, dependenciesOf_1.default)(game), game));
 exports.register = register;
 // The plugin loader imports each package for this side effect, as civ1-diplomacy's.
 (0, exports.register)(core_game_1.defaultGame);

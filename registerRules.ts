@@ -15,6 +15,7 @@ import {
 } from './lib/rules/relations';
 import { Game, defaultGame } from '@civ-clone/core-game';
 import Dependencies from './lib/Dependencies';
+import dependenciesOf from './lib/dependenciesOf';
 import Effect from '@civ-clone/core-rule/Effect';
 import Player from '@civ-clone/core-player/Player';
 import Rule from '@civ-clone/core-rule/Rule';
@@ -30,29 +31,11 @@ import { spacing } from './lib/numbers';
 import talks from './lib/talks';
 import { turnStartRules } from './lib/rules/turnStart';
 import civsMeetRules from './lib/rules/civsMeet';
+import agentLostRules from './lib/rules/espionage';
 
 export const PREFIX = 'civ2-diplomacy';
 
-export const dependenciesOf = (game: Game): Dependencies => ({
-  cityBuildRegistry: game.cityBuilds,
-  cityRegistry: game.cities,
-  clientRegistry: game.clients,
-  gameDifficultyRegistry: game.difficulty,
-  interactionRegistry: game.interactions,
-  landMassRegistry: game.landMasses,
-  playerGovernmentRegistry: game.playerGovernments,
-  playerRegistry: game.players,
-  playerResearchRegistry: game.playerResearch,
-  playerTreasuryRegistry: game.playerTreasuries,
-  playerWorldRegistry: game.playerWorlds,
-  requirementRegistry: game.requirements,
-  ruleRegistry: game.rules,
-  tileImprovementRegistry: game.tileImprovements,
-  traitRegistry: game.traits,
-  turn: game.turn,
-  unitRegistry: game.units,
-  wonderRegistry: game.wonders,
-});
+export { dependenciesOf };
 
 // The rules base-diplomacy's assemblers make that Civilization II keeps: registering each step of a negotiation, and
 //  the payment of tribute and the exchange of advances when they're accepted.
@@ -108,6 +91,7 @@ export const getRules = (
     ...declaredWarRules(PREFIX, dependencies, game.engine),
     ...turnStartRules(PREFIX, dependencies, pairs),
     ...civsMeetRules(PREFIX, dependencies, pairs),
+    ...agentLostRules(PREFIX, dependencies, game.engine, random),
     new SenateIntervenes(
       SENATE_RULE,
       new Effect((player: Player, other: Player | null, context): boolean =>

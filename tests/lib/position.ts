@@ -3,6 +3,7 @@ import AIClient from '@civ-clone/core-ai-client/AIClient';
 import Democracy from '@civ-clone/base-government-democracy/Democracy';
 import Dependencies from '../../lib/Dependencies';
 import Effect from '@civ-clone/core-rule/Effect';
+import Fundamentalism from '@civ-clone/base-government-fundamentalism/Fundamentalism';
 import { IAction } from '@civ-clone/core-diplomacy/Negotiation/Action';
 import InteractionRegistry from '@civ-clone/core-diplomacy/InteractionRegistry';
 import LandMass from '@civ-clone/core-world/LandMass';
@@ -24,7 +25,7 @@ export interface Side {
   human?: boolean;
   gold?: number;
   rank?: number;
-  government?: 'republic' | 'democracy';
+  government?: 'republic' | 'democracy' | 'fundamentalism';
   advances?: (typeof Advance)[];
   wonders?: (new (...args: any[]) => object)[];
   units?: {
@@ -144,7 +145,9 @@ export const position = (
           (side(player).government === 'republic' &&
             governments.includes(Republic)) ||
           (side(player).government === 'democracy' &&
-            governments.includes(Democracy)),
+            governments.includes(Democracy)) ||
+          (side(player).government === 'fundamentalism' &&
+            governments.includes(Fundamentalism)),
       }),
     },
     playerRegistry: { entries: () => players },
