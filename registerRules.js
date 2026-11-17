@@ -18,6 +18,7 @@ const senate_2 = require("./lib/senate");
 const numbers_1 = require("./lib/numbers");
 const talks_2 = require("./lib/talks");
 const turnStart_1 = require("./lib/rules/turnStart");
+const launch_1 = require("./lib/rules/launch");
 const civsMeet_1 = require("./lib/rules/civsMeet");
 const espionage_1 = require("./lib/rules/espionage");
 exports.PREFIX = 'civ2-diplomacy';
@@ -63,6 +64,7 @@ const getRules = (dependencies, game) => {
         ...(0, espionage_1.nuclearDeviceRules)(exports.PREFIX, dependencies),
         ...(0, espionage_1.incidentOfferRules)(exports.PREFIX, dependencies),
         ...(0, espionage_1.defeatedRules)(exports.PREFIX, dependencies),
+        ...(0, launch_1.launchRules)(exports.PREFIX, dependencies),
         new SenateIntervenes_1.default(RuleIds_1.SENATE_RULE, new Effect_1.default((player, other, context) => (0, senate_1.civ2SenateIntervenes)(dependencies, player, other, context))),
     ];
 };

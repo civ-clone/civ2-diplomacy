@@ -30,6 +30,7 @@ import { senateGovernment } from './lib/senate';
 import { spacing } from './lib/numbers';
 import talks from './lib/talks';
 import { turnStartRules } from './lib/rules/turnStart';
+import { launchRules } from './lib/rules/launch';
 import civsMeetRules from './lib/rules/civsMeet';
 import agentLostRules, {
   defeatedRules,
@@ -99,6 +100,7 @@ export const getRules = (
     ...nuclearDeviceRules(PREFIX, dependencies),
     ...incidentOfferRules(PREFIX, dependencies),
     ...defeatedRules(PREFIX, dependencies),
+    ...launchRules(PREFIX, dependencies),
     new SenateIntervenes(
       SENATE_RULE,
       new Effect((player: Player, other: Player | null, context): boolean =>

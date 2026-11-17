@@ -104,10 +104,10 @@ export declare const others: (
   ...players: Player[]
 ) => Player[];
 /**
- * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3118`, `GAME_AI_GANG_UP`): the
+ * The person the computer players gang up on (`civ_update_power_ranks`, `civ.cpp:3108-3129`, `GAME_AI_GANG_UP`): the
  *  top-ranked player, when a person, with more than 4 cities and no nuclear weapons, after turn 200 and above
- *  Chieftain; else `null`. The original also alerts them, above King, to a person whose spaceship has launched: not
- *  ported (no spaceships yet).
+ *  Chieftain; and above King, whatever the turn, a person whose spaceship has launched instead (`lib/spaceRace`'s
+ *  `launchedPerson`); else `null`.
  */
 export declare const gangUpLeader: (
   dependencies: Dependencies,

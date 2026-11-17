@@ -87,6 +87,7 @@ import { rollSenate } from '../senate';
 import { NEVER, advances } from '@civ-clone/civ2-science/data/advances';
 import Advance from '@civ-clone/core-science/Advance';
 import { advanceValue } from '../survey';
+import { KING, launched, raceActive } from '../spaceRace';
 import readers from '../readers';
 import { forgetWarnings, noteIntruders, warn, warned } from '../border';
 
@@ -1222,9 +1223,10 @@ export interface TurnStartRules {
  * - `RuleIds.borderIntruders`: the border incidents (`countIncidents`), the first intruded square of each city (B4).
  * - `RuleIds.attitudeDrift`: the attitude drift, pinned at 100 without an incident (B3).
  * - `<prefix>:player/turn-start/gang-up`: at the start of the turn of the person the computer players gang up on
- *   (`gangUpLeader`), each with more than one city that isn't its ally, if the person's reputation is above three
- *   times its wars + 3 or it holds a vendetta: without a treaty, contact and 1 colder; with one, one time in 32 per
- *   level + 1, hostile intent.
+ *   (`gangUpLeader`, a person whose ship has launched among them), each computer player with more than one city, if
+ *   the person's reputation is above three times its wars + 3, it holds a vendetta or the space race is on
+ *   (`raceActive`): without a treaty, contact and 1 colder; with a ceasefire or peace, one time in 32 per level + 1, or
+ *   always if it has launched itself, hostile intent; allied, hostile intent only if it has launched, above King.
  * - `<prefix>:player/turn-start/reputation-recovery`: a reputation recovers on schedule.
  */
 export const turnStartRules = (
@@ -1433,10 +1435,20 @@ export const turnStartRules = (
             (other: Player) =>
               !human(dependencies, other) &&
               cities(dependencies, other) > 1 &&
-              (bad || vendetta(dependencies, other, player)) &&
-              !allied(dependencies, other, player)
+              (bad ||
+                vendetta(dependencies, other, player) ||
+                raceActive(dependencies))
           )
           .forEach((other: Player) => {
+            // An ally turns on a person only for its own launch, above King (`civ.cpp:3158-3163`).
+            if (allied(dependencies, other, player)) {
+              if (launched(dependencies, other) && difficulty > KING) {
+                setFlag(dependencies, other, player, HOSTILE_INTENT);
+              }
+
+              return;
+            }
+
             if (
               !hasTreatyLevel(
                 dependencies,
@@ -1457,7 +1469,10 @@ export const turnStartRules = (
               return;
             }
 
-            if (roll(random, 32) <= difficulty) {
+            if (
+              roll(random, 32) <= difficulty ||
+              launched(dependencies, other)
+            ) {
               setFlag(dependencies, other, player, HOSTILE_INTENT);
             }
           });

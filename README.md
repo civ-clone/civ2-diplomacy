@@ -95,6 +95,20 @@ border incidents (`BORDER_INTRUDERS_RULE`, the first intruded square of each cit
 to withdraw at the next audience); the attitude drift; ganging up on the person who leads the world; reputation
 recovering.
 
+## The space race (`lib/spaceRace`, `lib/rules/launch`)
+
+- **Ganging up on a launch:** above King, a person whose spaceship has launched is the one the computer players gang up
+  on, at any turn and whoever leads the world (`gangUpLeader`, `civ.cpp:3119-3129`). Every gang-up also counts the
+  space race being on (the Apollo Program built, or a person knowing Space Flight: `raceActive`) as a reason, beside
+  the person's reputation and a vendetta. A computer player that has launched itself means to break its ceasefire or
+  peace every time, and above King its alliance too (`civ.cpp:3141-3163`).
+- **Overtaken** (`civ2-diplomacy:spaceship/launch/overtaken`, a core-spaceship `Launch` rule): a person's ship that
+  will arrive before a computer player's already in flight (`spaceship_launch`, `spaceship.cpp` ~1600). Below
+  Emperor, that computer player summons the person to talks (`INCIDENT`) on Chieftain or Warlord or when the person's
+  reputation is spotless, and otherwise means to break its treaty. From Emperor it breaks its ceasefire or peace there
+  and then, without a word, as the aggressor for long; an ally means to break the alliance. Arrival years are
+  civ2-spaceship's.
+
 ## Treaties
 
 Ceasefires and alliances are base-diplomacy's. A person's victim's allies join the war (100 colder). Cancelling an
@@ -140,8 +154,8 @@ proposals.
   Invention/Industrialization terms, nobody knowing it, and the advances it leads to. Left out: the shift toward
   militaristic of a computer player at war with a person ahead of it on a shared land mass; expansion by sea; the Port
   Facility's ships; the Aqueduct and Sewer sizes; the tribe's own preferences; the computer players' bonus terms.
-- **The space race, scenarios and the bloodlust option** in the evaluation, ganging up and the war price; the nuclear
-  threat mark the evaluation sets.
+- **The space race in the evaluation and the war price** (`ai_spaceship_race_behind`), scenarios and the bloodlust
+  option; the nuclear threat mark the evaluation sets.
 - **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person still
   reads it (`BROKEN` and `AGGRESSOR_LONG` are kept as the original sets them). Classic only leaves it unannounced.
 - **A person offered war after an incident** (`'offered'`) is asked at once in the original; here the offer is kept

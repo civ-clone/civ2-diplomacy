@@ -177,6 +177,7 @@ export const position = (
     traitRegistry: { getByLeader: () => [] },
     turn: clock,
     wonderRegistry: {
+      some: () => false,
       getByPlayer: (player: Player) =>
         (wonders.get(player) ?? []).map((WonderType) =>
           Object.assign(Object.create(WonderType.prototype), {
