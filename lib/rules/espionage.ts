@@ -9,7 +9,21 @@ import IndustrialSabotage from '@civ-clone/base-unit-action-industrial-sabotage/
 import PoisonWater from '@civ-clone/base-unit-action-poison-water/PoisonWater';
 import StealTechnology from '@civ-clone/base-unit-action-steal-technology/StealTechnology';
 import Unit from '@civ-clone/core-unit/Unit';
-import { espionageIncident } from '../espionage';
+import { applyPendingNuclearDevice, espionageIncident } from '../espionage';
+import Contact from '@civ-clone/base-diplomacy-interaction-contact/Contact';
+import Created from '@civ-clone/core-diplomacy/Rules/Interaction/Created';
+import Interaction from '@civ-clone/core-diplomacy/Interaction';
+import Low from '@civ-clone/core-rule/Priorities/Low';
+import Player from '@civ-clone/core-player/Player';
+import isBarbarian from '@civ-clone/base-civilization-barbarian/isBarbarian';
+
+const barbarian = (player: Player): boolean => {
+  try {
+    return isBarbarian(player);
+  } catch (e) {
+    return false;
+  }
+};
 
 /**
  * The missions whose lost agent raises an incident: those that call `spy_try_escape` with the victim
@@ -26,7 +40,8 @@ export const incidentMissions = [
 /**
  * `<prefix>:agent-lost/espionage-incident`: an agent removed after one of those missions (a Diplomat, or a Spy that
  *  failed to escape; never one caught before it) raises an incident between its player and the city's owner
- *  (`espionageIncident`, `spy_try_escape`'s `diplo_espionage_incident(civ3, civ)`, `unit_spy.cpp:99-101`).
+ *  (`espionageIncident`, `spy_try_escape`'s `diplo_espionage_incident(civ3, civ)`, `unit_spy.cpp:99-101`), unless the
+ *  owner is the barbarians (`0 < civ`).
  */
 export const agentLostRules = (
   prefix: string,
@@ -41,6 +56,7 @@ export const agentLostRules = (
         !caught &&
         city !== null &&
         city.player() !== unit.player() &&
+        !barbarian(city.player()) &&
         incidentMissions.some((MissionType) => mission instanceof MissionType)
     ),
     new Effect((unit: Unit, city: City | null, mission: Action): void => {
@@ -53,3 +69,31 @@ export const agentLostRules = (
 ];
 
 export default agentLostRules;
+
+/**
+ * `<prefix>:interaction/created/nuclear-device`: two players meet, and a nuclear device either planted that was
+ *  discovered before then makes the other 100 colder and at war with it (`applyPendingNuclearDevice`). `Low`, so the
+ *  pair's attitude is seeded first (`interaction/created/seed-attitude`).
+ */
+export const nuclearDeviceRules = (
+  prefix: string,
+  dependencies: Dependencies
+): Created[] => [
+  new Created(
+    `${prefix}:interaction/created/nuclear-device`,
+    new Low(),
+    new Criterion(
+      (interaction: Interaction): boolean => interaction instanceof Contact
+    ),
+    new Effect((interaction: Interaction): void => {
+      const [player, other] = interaction.players();
+
+      if (player === undefined || other === undefined || player === other) {
+        return;
+      }
+
+      applyPendingNuclearDevice(dependencies, player, other);
+      applyPendingNuclearDevice(dependencies, other, player);
+    })
+  ),
+];

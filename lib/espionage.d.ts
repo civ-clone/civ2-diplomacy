@@ -1,5 +1,6 @@
 import Dependencies from './Dependencies';
 import Engine from '@civ-clone/core-engine/Engine';
+import NuclearDeviceRecord from '../Records/NuclearDeviceRecord';
 import Player from '@civ-clone/core-player/Player';
 /** What an incident came to, for a notice. */
 export type IncidentOutcome =
@@ -49,23 +50,38 @@ export declare const espionageIncident: (
   random: () => number,
   { theft, engine }?: IncidentOptions
 ) => IncidentOutcome;
-/**
- * A person, the victim of an incident under a treaty, takes the chance it was offered (`diplomacy.cpp:5232-5251`):
- *  with an alliance, the alliance ends and they stay at peace; otherwise they are at war, with no declaration and no
- *  reputation lost (the original sets the war bit). They were in contact this turn.
- */
-export declare const incidentOfferAccepted: (
+/** Whether `victim` has an offer, from an incident of `perpetrator`'s, it hasn't answered (`INCIDENT_OFFERED`). */
+export declare const incidentOffered: (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player
+) => boolean;
+/** A person, the victim of an incident under a treaty, lets the offer go: nothing changes. */
+export declare const incidentOfferDeclined: (
   dependencies: Dependencies,
   perpetrator: Player,
   victim: Player
 ) => void;
 /**
+ * A person, the victim of an incident under a treaty, takes the chance it was offered (`diplomacy.cpp:5232-5251`):
+ *  with an alliance, the alliance ends and they stay at peace; otherwise they are at war, with no declaration and no
+ *  reputation lost (the original sets the war bit). They were in contact this turn. Refused (`false`) unless an
+ *  incident made the offer and it hasn't been answered (`incidentOffered`).
+ */
+export declare const incidentOfferAccepted: (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player
+) => boolean;
+/**
  * `diplo_force_war(player, enemy)` (`diplomacy.cpp:6861-6887`), after an attack across a treaty or a capture (an
  *  incited city's included):
  * - any intent of either to break their treaty, and any treaty one of them broke, is forgotten
  *   (`TREATY_HOSTILE_INTENT | TREATY_BROKEN`);
- * - under a ceasefire or a peace with a person on either side, `player` is made to declare war (`madeToDeclareWar`,
- *   which counts against its reputation);
+ * - under a ceasefire, a peace or an alliance (the original's peace bit is always set beside an alliance's,
+ *   `diplomacy.cpp:4162`, so `:6869` reads it) with a person on either side, `player` is made to declare war
+ *   (`madeToDeclareWar`, which counts against its reputation; on an ally it cancels the alliance first, as
+ *   `declared-war/ally` has it);
  * - any peace or alliance ends;
  * - once they've met: a war is in force (a `War`, with no declaration when there isn't one), any ceasefire left ends
  *   with it, both attitudes are 100, and `player` is marked as having attacked without declaring war
@@ -100,13 +116,29 @@ export declare const incited: (
 /**
  * A planted nuclear device is discovered (`unit_spy.cpp:705-712`): every other civilization is 100 colder toward
  *  `player` and at war with it, with no declaration and no reputation lost (the original sets the war bit). The
- *  barbarians are left out, as the original's loop starts at 1, and so is any civilization `player` hasn't met (the
- *  original sets the bit anyway; here a war needs contact). Whether it is discovered (½, a veteran ¼, never a
- *  Fundamentalist) is the mission's. Returns the civilizations now at war with it.
+ *  barbarians are left out, as the original's loop starts at 1. A civilization `player` hasn't met keeps a
+ *  `NuclearDeviceRecord` instead, and both apply when they meet (`civ2-diplomacy:interaction/created/nuclear-device`).
+ *  Whether it is discovered (½, a veteran ¼, never a Fundamentalist) is the mission's. Returns the civilizations now
+ *  at war with it.
  */
 export declare const nuclearDeviceDiscovered: (
   dependencies: Dependencies,
   player: Player,
   engine?: Pick<Engine, 'emit'>
 ) => Player[];
+/** The war `holder` owes `planter` for a nuclear device discovered before they met, if any. */
+export declare const pendingNuclearDevice: (
+  dependencies: Pick<Dependencies, 'interactionRegistry'>,
+  holder: Player,
+  planter: Player
+) => NuclearDeviceRecord | undefined;
+/**
+ * `holder` and `planter` have met: a nuclear device of `planter`'s discovered before then makes `holder` 100 colder
+ *  and at war with it, with no declaration, as the original set it at the time (`unit_spy.cpp:707-711`).
+ */
+export declare const applyPendingNuclearDevice: (
+  dependencies: Dependencies,
+  holder: Player,
+  planter: Player
+) => boolean;
 export default espionageIncident;

@@ -43,6 +43,10 @@ export declare const MET_THIS_TURN = 8388608;
 /** Two computer players' units met this turn and they decided what to do (`diplo_civs_meet`): our own bit, so a pair
  *  decides once a turn, kept in a save. */
 export declare const COMPUTERS_MET = 33554432;
+/** `holder`, a person, was the victim of `toward`'s espionage under a treaty and may go to war over it (or end the
+ *  alliance): the original's popup (`diplomacy.cpp:5232-5251`), asked at once; our own bit, kept until the person
+ *  answers (`incidentOfferAccepted`, `incidentOfferDeclined`) or another offer replaces it. */
+export declare const INCIDENT_OFFERED = 67108864;
 /** The bits cleared at the start of every turn (`civ.cpp:7080`, `& 0xff5fbfff`), and our own `COMPUTERS_MET`. */
 export declare const TURN_BITS: number;
 /** What signing a ceasefire, a peace or an alliance clears both ways (`diplo_set_treaty_flags`, `0x2a60`, less war). */

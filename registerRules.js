@@ -60,6 +60,7 @@ const getRules = (dependencies, game) => {
         ...(0, turnStart_1.turnStartRules)(exports.PREFIX, dependencies, pairs),
         ...(0, civsMeet_1.default)(exports.PREFIX, dependencies, pairs),
         ...(0, espionage_1.default)(exports.PREFIX, dependencies, game.engine, random),
+        ...(0, espionage_1.nuclearDeviceRules)(exports.PREFIX, dependencies),
         new SenateIntervenes_1.default(RuleIds_1.SENATE_RULE, new Effect_1.default((player, other, context) => (0, senate_1.civ2SenateIntervenes)(dependencies, player, other, context))),
     ];
 };

@@ -31,7 +31,7 @@ import { spacing } from './lib/numbers';
 import talks from './lib/talks';
 import { turnStartRules } from './lib/rules/turnStart';
 import civsMeetRules from './lib/rules/civsMeet';
-import agentLostRules from './lib/rules/espionage';
+import agentLostRules, { nuclearDeviceRules } from './lib/rules/espionage';
 
 export const PREFIX = 'civ2-diplomacy';
 
@@ -92,6 +92,7 @@ export const getRules = (
     ...turnStartRules(PREFIX, dependencies, pairs),
     ...civsMeetRules(PREFIX, dependencies, pairs),
     ...agentLostRules(PREFIX, dependencies, game.engine, random),
+    ...nuclearDeviceRules(PREFIX, dependencies),
     new SenateIntervenes(
       SENATE_RULE,
       new Effect((player: Player, other: Player | null, context): boolean =>

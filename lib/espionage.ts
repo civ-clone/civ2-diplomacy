@@ -1,9 +1,11 @@
 import {
   BROKEN,
   HOSTILE_INTENT,
+  INCIDENT_OFFERED,
   SNEAK_ATTACK,
   WAR_THIS_TURN,
   clearBoth,
+  clearFlag,
   hasFlag,
   setBoth,
   setFlag,
@@ -21,6 +23,7 @@ import Dependencies from './Dependencies';
 import Engine from '@civ-clone/core-engine/Engine';
 import Fundamentalism from '@civ-clone/base-government-fundamentalism/Fundamentalism';
 import Never from '@civ-clone/core-diplomacy/Expiries/Never';
+import NuclearDeviceRecord from '../Records/NuclearDeviceRecord';
 import Peace from '@civ-clone/base-diplomacy-declaration-peace/Peace';
 import Player from '@civ-clone/core-player/Player';
 import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
@@ -146,6 +149,7 @@ export const espionageIncident = (
       return 'none';
     }
 
+    setFlag(dependencies, victim, perpetrator, INCIDENT_OFFERED);
     outcome = tell('offered');
   }
 
@@ -187,16 +191,37 @@ export const espionageIncident = (
   return outcome;
 };
 
+/** Whether `victim` has an offer, from an incident of `perpetrator`'s, it hasn't answered (`INCIDENT_OFFERED`). */
+export const incidentOffered = (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player
+): boolean => hasFlag(dependencies, victim, perpetrator, INCIDENT_OFFERED);
+
+/** A person, the victim of an incident under a treaty, lets the offer go: nothing changes. */
+export const incidentOfferDeclined = (
+  dependencies: Dependencies,
+  perpetrator: Player,
+  victim: Player
+): void => clearFlag(dependencies, victim, perpetrator, INCIDENT_OFFERED);
+
 /**
  * A person, the victim of an incident under a treaty, takes the chance it was offered (`diplomacy.cpp:5232-5251`):
  *  with an alliance, the alliance ends and they stay at peace; otherwise they are at war, with no declaration and no
- *  reputation lost (the original sets the war bit). They were in contact this turn.
+ *  reputation lost (the original sets the war bit). They were in contact this turn. Refused (`false`) unless an
+ *  incident made the offer and it hasn't been answered (`incidentOffered`).
  */
 export const incidentOfferAccepted = (
   dependencies: Dependencies,
   perpetrator: Player,
   victim: Player
-): void => {
+): boolean => {
+  if (!incidentOffered(dependencies, perpetrator, victim)) {
+    return false;
+  }
+
+  clearFlag(dependencies, victim, perpetrator, INCIDENT_OFFERED);
+
   if (treaty(dependencies, victim, perpetrator) === TreatyLevel.Alliance) {
     cancelAlliance(dependencies, victim, perpetrator);
   } else {
@@ -204,6 +229,8 @@ export const incidentOfferAccepted = (
   }
 
   recordContact(dependencies, victim, perpetrator, dependencies.turn.value());
+
+  return true;
 };
 
 /**
@@ -211,8 +238,10 @@ export const incidentOfferAccepted = (
  *  incited city's included):
  * - any intent of either to break their treaty, and any treaty one of them broke, is forgotten
  *   (`TREATY_HOSTILE_INTENT | TREATY_BROKEN`);
- * - under a ceasefire or a peace with a person on either side, `player` is made to declare war (`madeToDeclareWar`,
- *   which counts against its reputation);
+ * - under a ceasefire, a peace or an alliance (the original's peace bit is always set beside an alliance's,
+ *   `diplomacy.cpp:4162`, so `:6869` reads it) with a person on either side, `player` is made to declare war
+ *   (`madeToDeclareWar`, which counts against its reputation; on an ally it cancels the alliance first, as
+ *   `declared-war/ally` has it);
  * - any peace or alliance ends;
  * - once they've met: a war is in force (a `War`, with no declaration when there isn't one), any ceasefire left ends
  *   with it, both attitudes are 100, and `player` is marked as having attacked without declaring war
@@ -232,7 +261,7 @@ export const forceWar = (
   const level = treaty(dependencies, player, enemy);
 
   if (
-    (level === TreatyLevel.Ceasefire || level === TreatyLevel.Peace) &&
+    level >= TreatyLevel.Ceasefire &&
     (human(dependencies, player) || human(dependencies, enemy))
   ) {
     madeToDeclareWar(dependencies, player, enemy);
@@ -303,9 +332,10 @@ export const incited = (
 /**
  * A planted nuclear device is discovered (`unit_spy.cpp:705-712`): every other civilization is 100 colder toward
  *  `player` and at war with it, with no declaration and no reputation lost (the original sets the war bit). The
- *  barbarians are left out, as the original's loop starts at 1, and so is any civilization `player` hasn't met (the
- *  original sets the bit anyway; here a war needs contact). Whether it is discovered (½, a veteran ¼, never a
- *  Fundamentalist) is the mission's. Returns the civilizations now at war with it.
+ *  barbarians are left out, as the original's loop starts at 1. A civilization `player` hasn't met keeps a
+ *  `NuclearDeviceRecord` instead, and both apply when they meet (`civ2-diplomacy:interaction/created/nuclear-device`).
+ *  Whether it is discovered (½, a veteran ¼, never a Fundamentalist) is the mission's. Returns the civilizations now
+ *  at war with it.
  */
 export const nuclearDeviceDiscovered = (
   dependencies: Dependencies,
@@ -313,14 +343,29 @@ export const nuclearDeviceDiscovered = (
   engine?: Pick<Engine, 'emit'>
 ): Player[] => {
   const attitudes = attitude(dependencies),
-    enemies = dependencies.playerRegistry
+    others = dependencies.playerRegistry
       .entries()
-      .filter(
-        (other: Player) =>
-          other !== player &&
-          !barbarian(other) &&
-          inContact(dependencies, player, other)
-      );
+      .filter((other: Player) => other !== player && !barbarian(other)),
+    enemies = others.filter((other: Player) =>
+      inContact(dependencies, player, other)
+    );
+
+  others
+    .filter(
+      (other: Player) =>
+        !enemies.includes(other) &&
+        pendingNuclearDevice(dependencies, other, player) === undefined
+    )
+    .forEach((other: Player) =>
+      dependencies.interactionRegistry.register(
+        new NuclearDeviceRecord(
+          other,
+          player,
+          dependencies.ruleRegistry,
+          dependencies.turn
+        )
+      )
+    );
 
   enemies.forEach((other: Player) => {
     if (attitudes.get(other, player) !== undefined) {
@@ -337,6 +382,51 @@ export const nuclearDeviceDiscovered = (
   engine?.emit('civ2-diplomacy:nuclear-device-discovered', player, enemies);
 
   return enemies;
+};
+
+/** The war `holder` owes `planter` for a nuclear device discovered before they met, if any. */
+export const pendingNuclearDevice = (
+  dependencies: Pick<Dependencies, 'interactionRegistry'>,
+  holder: Player,
+  planter: Player
+): NuclearDeviceRecord | undefined =>
+  dependencies.interactionRegistry
+    .getByPlayer(holder)
+    .find(
+      (interaction): interaction is NuclearDeviceRecord =>
+        interaction instanceof NuclearDeviceRecord &&
+        interaction.holder() === holder &&
+        interaction.planter() === planter
+    );
+
+/**
+ * `holder` and `planter` have met: a nuclear device of `planter`'s discovered before then makes `holder` 100 colder
+ *  and at war with it, with no declaration, as the original set it at the time (`unit_spy.cpp:707-711`).
+ */
+export const applyPendingNuclearDevice = (
+  dependencies: Dependencies,
+  holder: Player,
+  planter: Player
+): boolean => {
+  const record = pendingNuclearDevice(dependencies, holder, planter);
+
+  if (record === undefined) {
+    return false;
+  }
+
+  dependencies.interactionRegistry.unregister(record);
+
+  const attitudes = attitude(dependencies);
+
+  if (attitudes.get(holder, planter) !== undefined) {
+    attitudes.adjust(holder, planter, 100, 'nuclear-device');
+  }
+
+  if (treaty(dependencies, planter, holder) !== TreatyLevel.War) {
+    declareWarQuietly(dependencies, planter, holder);
+  }
+
+  return true;
 };
 
 const barbarian = (player: Player): boolean => {

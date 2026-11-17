@@ -51,6 +51,11 @@ export const MET_THIS_TURN = 0x800000;
  *  decides once a turn, kept in a save. */
 export const COMPUTERS_MET = 0x2000000;
 
+/** `holder`, a person, was the victim of `toward`'s espionage under a treaty and may go to war over it (or end the
+ *  alliance): the original's popup (`diplomacy.cpp:5232-5251`), asked at once; our own bit, kept until the person
+ *  answers (`incidentOfferAccepted`, `incidentOfferDeclined`) or another offer replaces it. */
+export const INCIDENT_OFFERED = 0x4000000;
+
 /** The bits cleared at the start of every turn (`civ.cpp:7080`, `& 0xff5fbfff`), and our own `COMPUTERS_MET`. */
 export const TURN_BITS =
   CHANGED_THIS_TURN | WAR_THIS_TURN | MET_THIS_TURN | COMPUTERS_MET;

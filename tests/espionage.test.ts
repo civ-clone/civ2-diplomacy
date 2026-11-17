@@ -2,6 +2,8 @@ import {
   espionageIncident,
   forceWar,
   incidentOfferAccepted,
+  incidentOfferDeclined,
+  incidentOffered,
   incited,
   nuclearDeviceDiscovered,
 } from '../lib/espionage';
@@ -14,6 +16,9 @@ import { SNEAK_ATTACK, hasFlag } from '../lib/flags';
 import { TreatyLevel } from '@civ-clone/base-diplomacy/lib/treatyLevel';
 import { Bronze, Side, Wheel, position } from './lib/position';
 import AgentLost from '@civ-clone/base-unit-agent/Rules/AgentLost';
+import Barbarian from '@civ-clone/base-civilization-barbarian/Barbarian';
+import NuclearDeviceRecord from '../Records/NuclearDeviceRecord';
+import Unit from '@civ-clone/core-unit/Unit';
 import Effect from '@civ-clone/core-rule/Effect';
 import EstablishEmbassy from '@civ-clone/base-unit-action-establish-embassy/EstablishEmbassy';
 import IndustrialSabotage from '@civ-clone/base-unit-action-industrial-sabotage/IndustrialSabotage';
@@ -218,16 +223,44 @@ describe('espionage', (): void => {
       TreatyLevel.Peace
     );
 
-    incidentOfferAccepted(peace.dependencies, peace.perp, peace.vict);
+    expect(incidentOffered(peace.dependencies, peace.perp, peace.vict)).true;
+    expect(incidentOfferAccepted(peace.dependencies, peace.perp, peace.vict))
+      .true;
     expect(treaty(peace.dependencies, peace.perp, peace.vict)).equal(
       TreatyLevel.War
     );
+    expect(incidentOffered(peace.dependencies, peace.perp, peace.vict)).false;
     expect(reputation(peace.dependencies).get(peace.vict)).equal(0);
 
     const allied = setUp({}, { human: true }, TreatyLevel.Alliance);
 
-    incidentOfferAccepted(allied.dependencies, allied.perp, allied.vict);
+    // No offer made: refused.
+    expect(incidentOfferAccepted(allied.dependencies, allied.perp, allied.vict))
+      .false;
     expect(treaty(allied.dependencies, allied.perp, allied.vict)).equal(
+      TreatyLevel.Alliance
+    );
+
+    espionageIncident(allied.dependencies, allied.perp, allied.vict, () => 0);
+    expect(incidentOfferAccepted(allied.dependencies, allied.perp, allied.vict))
+      .true;
+    expect(treaty(allied.dependencies, allied.perp, allied.vict)).equal(
+      TreatyLevel.Peace
+    );
+
+    const declined = setUp({}, { human: true }, TreatyLevel.Peace);
+
+    espionageIncident(
+      declined.dependencies,
+      declined.perp,
+      declined.vict,
+      () => 0
+    );
+    incidentOfferDeclined(declined.dependencies, declined.perp, declined.vict);
+    expect(
+      incidentOfferAccepted(declined.dependencies, declined.perp, declined.vict)
+    ).false;
+    expect(treaty(declined.dependencies, declined.perp, declined.vict)).equal(
       TreatyLevel.Peace
     );
 
@@ -268,6 +301,26 @@ describe('espionage', (): void => {
     expect(hasFlag(dependencies, perp, vict, SNEAK_ATTACK)).true;
     expect(forceWar(dependencies, perp, vict)).false;
     expect(reputation(dependencies).get(perp)).equal(0);
+
+    // An alliance carries the original's peace bit too (`diplomacy.cpp:4162`, read at `:6869`): with a person, the
+    //  alliance is cancelled by a declaration (reputation, the victim's vendetta) before the war.
+    const allied = setUp({ human: true }, {}, TreatyLevel.Alliance);
+
+    expect(forceWar(allied.dependencies, allied.perp, allied.vict)).true;
+    expect(treaty(allied.dependencies, allied.perp, allied.vict)).equal(
+      TreatyLevel.War
+    );
+    expect(reputation(allied.dependencies).get(allied.perp)).greaterThan(0);
+    expect(vendetta(allied.dependencies, allied.vict, allied.perp)).true;
+    expect(allied.attitudes.get(allied.vict, allied.perp)).equal(100);
+
+    const computers = setUp({}, {}, TreatyLevel.Alliance);
+
+    forceWar(computers.dependencies, computers.perp, computers.vict);
+    expect(
+      treaty(computers.dependencies, computers.perp, computers.vict)
+    ).equal(TreatyLevel.War);
+    expect(reputation(computers.dependencies).get(computers.perp)).equal(0);
 
     const unmet = setUp({}, {}, null);
 
@@ -337,6 +390,32 @@ describe('espionage', (): void => {
       TreatyLevel.Contact
     );
     expect(reputation(game.dependencies).get(planter)).equal(0);
+
+    // Not met yet: the original sets the war bit and +100 regardless (`unit_spy.cpp:707-711`), so both wait for
+    //  contact, and nobody counts as having met meanwhile.
+    expect(game.interactionRegistry.getByPlayers(planter, unmet)).eql([]);
+    expect(
+      game.interactionRegistry
+        .getByPlayer(unmet)
+        .filter((record) => record instanceof NuclearDeviceRecord).length
+    ).equal(1);
+
+    nuclearDeviceDiscovered(game.dependencies, planter);
+    expect(
+      game.interactionRegistry
+        .getByPlayer(unmet)
+        .filter((record) => record instanceof NuclearDeviceRecord).length
+    ).equal(1);
+
+    makeContact(game.interactionRegistry, unmet, planter, game.ruleRegistry);
+    expect(treaty(game.dependencies, planter, unmet)).equal(TreatyLevel.War);
+    expect(attitude(game.dependencies).get(unmet, planter)).equal(100);
+    expect(attitude(game.dependencies).get(planter, unmet)).lessThan(100);
+    expect(
+      game.interactionRegistry
+        .getByPlayer(unmet)
+        .filter((record) => record instanceof NuclearDeviceRecord).length
+    ).equal(0);
   });
 
   it('raises an incident when an agent is removed after a theft, sabotage or poisoning, never when caught (`unit_spy.cpp:99-101`)', (): void => {
@@ -357,5 +436,18 @@ describe('espionage', (): void => {
       ruleRegistry.process(AgentLost, unit, city, mission, caught);
       expect(attitudes.get(vict, perp)).equal(expected);
     });
+
+    // Never against the barbarians (`spy_try_escape` needs `0 < civ`, `unit_spy.cpp:99`).
+    const { ruleRegistry, perp, vict, attitudes } = setUp({}, {});
+
+    vict.setCivilization(new Barbarian());
+    ruleRegistry.process(
+      AgentLost,
+      { player: () => perp } as unknown as Unit,
+      { player: () => vict },
+      Object.create(StealTechnology.prototype),
+      false
+    );
+    expect(attitudes.get(vict, perp)).equal(40);
   });
 });
