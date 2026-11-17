@@ -62,15 +62,22 @@ rules, for whoever brings the government down.
   Republic one time in two). Returns the outcome and emits `civ2-diplomacy:espionage-incident` (perpetrator, victim,
   outcome); a scandal's notice is the `SenateScandal` rule's (civ2-government emits `civ2-government:senate-scandal`).
 - **`AgentLost`** (`civ2-diplomacy:agent-lost/espionage-incident`): an agent removed after stealing an advance,
-  industrial sabotage or poisoning water (not one caught before it) raises an incident with the city's owner.
+  industrial sabotage or poisoning water (not one caught before it) raises an incident with the city's owner, unless
+  that is the barbarians.
+- **The offer to a person who is the victim** is kept as our own treaty bit (`INCIDENT_OFFERED`, in the saved
+  `TreatyFlagsRecord`): `incidentOffered`, `incidentOfferAccepted` (refused, `false`, with no offer) and
+  `incidentOfferDeclined`.
 - **`forceWar(dependencies, player, enemy)`** (`diplo_force_war`, `:6861-6887`): the war an attack or a capture across a
-  treaty makes, both attitudes 100, a sneak attack marked once (it returns whether, so a battle can call
+  treaty makes (an alliance counts, as the original's peace bit is set beside it: a person's ally is cancelled by a
+  declaration first), both attitudes 100, a sneak attack marked once (it returns whether, so a battle can call
   `alliesJoinWar`).
 - **`incited(dependencies, inciter, victim, doubled, random, options)`**: at the plain price an incident and a forced
   war; at the doubled price, offered only under a treaty, the victim holds a vendetta instead
   (`unit_spy.cpp:835-846`, `city.cpp:5404`). The founder and the capture's `INCIDENT` are the city's.
-- **`nuclearDeviceDiscovered(dependencies, player, engine?)`** (`unit_spy.cpp:705-712`): every other civilization it has
-  met is 100 colder and at war with it, with no reputation lost. The roll (½, a veteran ¼, never a Fundamentalist) is
+- **`nuclearDeviceDiscovered(dependencies, player, engine?)`** (`unit_spy.cpp:705-712`): every other civilization is
+  100 colder and at war with it, with no reputation lost; one it hasn't met keeps a `NuclearDeviceRecord` (saved;
+  keyed on that civilization alone, so nobody counts as met) and both apply when they meet
+  (`civ2-diplomacy:interaction/created/nuclear-device`, `Low`, after the attitude is seeded). The roll (½, a veteran ¼, never a Fundamentalist) is
   the mission's.
 - **`holdVendetta(dependencies, holder, against)`**, and **`dependenciesOf(game)`** (`lib/dependenciesOf`) for callers
   in other packages.
@@ -134,8 +141,6 @@ proposals.
   threat mark the evaluation sets.
 - **A treaty broken (B37)** ends for both sides here, as civ-clone keeps one treaty per pair; the original's person still
   reads it (`BROKEN` and `AGGRESSOR_LONG` are kept as the original sets them). Classic only leaves it unannounced.
-- **A discovered nuclear device** turns only the civilizations its planter has met against it; the original sets the war
-  bit with everyone, met or not, but here a war needs contact.
-- **A person offered war after an incident** (`'offered'`) answers through the renderer, which calls
-  `incidentOfferAccepted`; until stage X wires it, the offer is only announced. Espionage sets no `INCIDENT` (the
+- **A person offered war after an incident** (`'offered'`) is asked at once in the original; here the offer is kept
+  (`INCIDENT_OFFERED`) until the person answers (`incidentOfferAccepted`, `incidentOfferDeclined`). Espionage sets no `INCIDENT` (the
   original's `diplo_espionage_incident` doesn't either: a capture and a nuclear threat do).
