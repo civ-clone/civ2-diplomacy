@@ -68,7 +68,9 @@ import Ceasefire from '@civ-clone/base-diplomacy-declaration-ceasefire/Ceasefire
 import City from '@civ-clone/core-city/City';
 import Criterion from '@civ-clone/core-rule/Criterion';
 import Dependencies from '../Dependencies';
+import Description from '@civ-clone/core-rule/Description';
 import Effect from '@civ-clone/core-rule/Effect';
+import EiffelTower from '@civ-clone/base-wonder-eiffeltower/EiffelTower';
 import Engine from '@civ-clone/core-engine/Engine';
 import High from '@civ-clone/core-rule/Priorities/High';
 import Peace from '@civ-clone/base-diplomacy-declaration-peace/Peace';
@@ -1415,7 +1417,9 @@ export const turnStartRules = (
       computer,
       new Effect((player: Player): void =>
         driftAttitude(dependencies, player, false)
-      )
+      ),
+      // The Eiffel Tower's owner: each computer player's attitude to it drifts warmer (`attitudeDelta`).
+      new Description({ type: 'attitude_drift', subject: EiffelTower })
     ),
     new TurnStart(
       `${prefix}:player/turn-start/gang-up`,
@@ -1510,7 +1514,9 @@ export const turnStartRules = (
             }
           });
         }
-      })
+      }),
+      // The Eiffel Tower's owner's reputation recovers on every check, down to 0 (`reputationRecovers`).
+      new Description({ type: 'reputation_recovery', subject: EiffelTower })
     ),
   ];
 };

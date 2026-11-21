@@ -10,6 +10,7 @@ import ProposalAvailable from '@civ-clone/base-diplomacy/Rules/ProposalAvailable
 import Resolved from '@civ-clone/core-diplomacy/Rules/Proposal/Resolved';
 import Step from '@civ-clone/core-diplomacy/Rules/Negotiation/Step';
 import Terminated from '@civ-clone/core-diplomacy/Rules/Negotiation/Terminated';
+import Description from '@civ-clone/core-rule/Description';
 declare global {
   interface ChoiceMetaDataMap {
     'diplomacy.exchange-knowledge': typeof Advance;
@@ -17,6 +18,18 @@ declare global {
 }
 /** As many of the person's choices as one meeting step offers: one `Step` rule each. */
 export declare const PERSON_STEPS = 48;
+/**
+ * What the wonders do to the computer player's answers (civ-clone/web-renderer#1291): it accepts peace from the owner
+ *  of the Great Wall or the United Nations (`peaceFlags`), shares maps without an alliance with the owner of Marco
+ *  Polo's or Magellan's (`sharesMaps`), and hears more of the Eiffel Tower's owner's proposals (`patienceLimit`).
+ */
+export declare const computerStepDescription: Description;
+/**
+ * What the wonders do to the computer player's view of the person as talks open (`evaluate`, civ-clone/web-renderer#1291):
+ *  the owner of the Great Wall or the United Nations faces no aggressive demands and is warmer in talks; a computer
+ *  owner of Marco Polo's asks a quarter more tribute.
+ */
+export declare const beginDescription: Description;
 /** The talks' `Step` rules: the computer player's step, then each of the person's choices. */
 export declare const stepRules: (talks: Talks) => Step[];
 /**

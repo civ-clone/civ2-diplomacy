@@ -17,6 +17,10 @@ export interface Evaluation {
   reputation: number;
   turnsSinceContact: number;
 }
+/** How much warmer (lower) a computer player's attitude in talks is to the owner of the Great Wall or the United Nations. */
+export declare const PACIFYING_ATTITUDE = 10;
+/** How many more of the Eiffel Tower's owner's proposals a computer player hears before it ends the meeting. */
+export declare const EIFFEL_TOWER_PATIENCE = 1;
 /** `holder`'s attitude toward `toward`, 50 before one is seeded. */
 export declare const attitudeOf: (
   dependencies: Dependencies

@@ -37,7 +37,11 @@ import {
 } from '@civ-clone/base-diplomacy/lib/declareWar';
 import War from '@civ-clone/base-diplomacy-declaration-war/War';
 import { attitude, reputation } from '../relations';
-import { reputationCost, startingAttitude } from '../formulas';
+import {
+  SPARED_REPUTATION,
+  reputationCost,
+  startingAttitude,
+} from '../formulas';
 import City from '@civ-clone/core-city/City';
 import Contact from '@civ-clone/base-diplomacy-interaction-contact/Contact';
 import Created from '@civ-clone/core-diplomacy/Rules/Interaction/Created';
@@ -46,7 +50,9 @@ import Declaration from '@civ-clone/core-diplomacy/Declaration';
 import DeclaredWar from '@civ-clone/base-diplomacy/Rules/DeclaredWar';
 import Dependencies from '../Dependencies';
 import Detonated from '@civ-clone/base-unit-action-nuclear-attack/Rules/Detonated';
+import Description from '@civ-clone/core-rule/Description';
 import Effect from '@civ-clone/core-rule/Effect';
+import EiffelTower from '@civ-clone/base-wonder-eiffeltower/EiffelTower';
 import Embassy from '@civ-clone/base-unit-action-establish-embassy/Embassy';
 import Engine from '@civ-clone/core-engine/Engine';
 import Expired from '@civ-clone/core-diplomacy/Rules/Declaration/Expired';
@@ -252,7 +258,13 @@ export const declaredWarRules = (
           );
         }
       }
-    )
+    ),
+    // The Eiffel Tower's owner: breaking a treaty costs it a point less (`reputationCost`).
+    new Description({
+      type: 'reputation_spared',
+      subject: EiffelTower,
+      value: SPARED_REPUTATION,
+    })
   ),
   new DeclaredWar(
     `${prefix}:declared-war/attitude`,

@@ -174,6 +174,8 @@ export declare const senateSteps: (
   threshold: number,
   inSession: boolean
 ) => boolean;
+/** The point of reputation a broken treaty costs that Chieftain and the Eiffel Tower spare. */
+export declare const SPARED_REPUTATION = 1;
 /**
  * The reputation a declaration of war costs (`diplo_declare_war`, `:1196-1265`). `broken` 'alliance', 'treaty' (a
  *  ceasefire or a peace) or 'none'; `ceasefireLingers` when the peace still carries a ceasefire, which charges twice;

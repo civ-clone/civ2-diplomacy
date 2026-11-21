@@ -104,7 +104,9 @@ import Unit from '@civ-clone/core-unit/Unit';
 import Vendetta from '@civ-clone/library-diplomacy/Declarations/Vendetta';
 import Never from '@civ-clone/core-diplomacy/Expiries/Never';
 import { hasVendetta } from '@civ-clone/library-diplomacy/lib/holds';
-import { pacifies } from '../wonders';
+import { EIFFEL_TOWER_PATIENCE, PACIFYING_ATTITUDE } from '../evaluate';
+import Description from '@civ-clone/core-rule/Description';
+import { diplomaticWonders, pacifies } from '../wonders';
 import { Writing } from '@civ-clone/civ2-science/Advances';
 import { activeDeclarations } from '@civ-clone/base-diplomacy/lib/declareWar';
 import { answered } from '../callForHelp';
@@ -155,6 +157,40 @@ const cached = <T>(
   return value;
 };
 
+const {
+  'eiffel-tower': EiffelTower,
+  'great-wall': GreatWall,
+  'magellans-expedition': MagellansExpedition,
+  'marco-polos-embassy': MarcoPolosEmbassy,
+  'united-nations': UnitedNations,
+} = diplomaticWonders;
+
+/**
+ * What the wonders do to the computer player's answers (civ-clone/web-renderer#1291): it accepts peace from the owner
+ *  of the Great Wall or the United Nations (`peaceFlags`), shares maps without an alliance with the owner of Marco
+ *  Polo's or Magellan's (`sharesMaps`), and hears more of the Eiffel Tower's owner's proposals (`patienceLimit`).
+ */
+export const computerStepDescription = new Description(
+  { type: 'talks_peace', subject: GreatWall },
+  { type: 'talks_peace', subject: UnitedNations },
+  { type: 'shared_maps', subject: MarcoPolosEmbassy },
+  { type: 'shared_maps', subject: MagellansExpedition },
+  { type: 'talks_patience', subject: EiffelTower, value: EIFFEL_TOWER_PATIENCE }
+);
+
+/**
+ * What the wonders do to the computer player's view of the person as talks open (`evaluate`, civ-clone/web-renderer#1291):
+ *  the owner of the Great Wall or the United Nations faces no aggressive demands and is warmer in talks; a computer
+ *  owner of Marco Polo's asks a quarter more tribute.
+ */
+export const beginDescription = new Description(
+  { type: 'talks_no_tribute', subject: GreatWall },
+  { type: 'talks_attitude', subject: GreatWall, value: PACIFYING_ATTITUDE },
+  { type: 'talks_no_tribute', subject: UnitedNations },
+  { type: 'talks_attitude', subject: UnitedNations, value: PACIFYING_ATTITUDE },
+  { type: 'tribute_demand', subject: MarcoPolosEmbassy, step: 'more' }
+);
+
 /** The talks' `Step` rules: the computer player's step, then each of the person's choices. */
 export const stepRules = (talks: Talks): Step[] => {
   const computerSteps = new WeakMap<
@@ -177,7 +213,8 @@ export const stepRules = (talks: Talks): Step[] => {
       ),
       new Effect(
         (negotiation: Negotiation): IAction => computerStep(negotiation)!
-      )
+      ),
+      computerStepDescription
     ),
     ...Array.from(
       { length: PERSON_STEPS },
@@ -288,7 +325,8 @@ export const interactionRules = (
         (interaction: IInteraction, negotiation: Negotiation): void => {
           begin(dependencies, negotiation);
         }
-      )
+      ),
+      beginDescription
     ),
     new InteractionRule(
       `${prefix}:negotiation/interaction/contact`,

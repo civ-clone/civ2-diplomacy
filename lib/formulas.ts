@@ -579,6 +579,9 @@ export const senateSteps = (
   return government === 'democracy' || inSession;
 };
 
+/** The point of reputation a broken treaty costs that Chieftain and the Eiffel Tower spare. */
+export const SPARED_REPUTATION = 1;
+
 /**
  * The reputation a declaration of war costs (`diplo_declare_war`, `:1196-1265`). `broken` 'alliance', 'treaty' (a
  *  ceasefire or a peace) or 'none'; `ceasefireLingers` when the peace still carries a ceasefire, which charges twice;
@@ -600,10 +603,10 @@ export const reputationCost = (
   const spared = chieftain || eiffel;
 
   if (broken === 'alliance') {
-    return (spared ? 0 : 1) + (own ? 1 : 0);
+    return (spared ? 0 : SPARED_REPUTATION) + (own ? 1 : 0);
   }
 
-  const once = (topPower && own ? 1 : 0) + (spared ? 0 : 1);
+  const once = (topPower && own ? 1 : 0) + (spared ? 0 : SPARED_REPUTATION);
 
   return ceasefireLingers ? once * 2 : once;
 };

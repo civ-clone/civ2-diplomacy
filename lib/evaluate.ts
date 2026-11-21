@@ -71,6 +71,12 @@ const clamp = (value: number, min: number, max: number): number =>
 
 const div = (value: number, by: number): number => Math.trunc(value / by);
 
+/** How much warmer (lower) a computer player's attitude in talks is to the owner of the Great Wall or the United Nations. */
+export const PACIFYING_ATTITUDE = 10;
+
+/** How many more of the Eiffel Tower's owner's proposals a computer player hears before it ends the meeting. */
+export const EIFFEL_TOWER_PATIENCE = 1;
+
 /** `holder`'s attitude toward `toward`, 50 before one is seeded. */
 export const attitudeOf =
   (dependencies: Dependencies) =>
@@ -247,7 +253,7 @@ export const evaluate = (
     targetIsLeader = false;
     suppressedAggression = aggressive;
     aggressive = false;
-    current -= 10;
+    current -= PACIFYING_ATTITUDE;
   }
 
   if (theirReputation !== 0) {
@@ -453,7 +459,7 @@ export const patienceLimit = (
   }
 
   if (ownsWonder(dependencies, other, 'eiffel-tower')) {
-    limit++;
+    limit += EIFFEL_TOWER_PATIENCE;
   }
 
   if (atPeace(dependencies, computer, other)) {
